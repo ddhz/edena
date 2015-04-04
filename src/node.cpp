@@ -24,15 +24,16 @@ using namespace std;
 
 #include "node.h"
 #include "readsStorage.h"
-//#include "layouts.h"
 #include "globalFunc.h"
 #include "NodeIt.h"
 #include "stat.h"
 #include "overlapGraph.h"
+#include "Param.h"
 
 extern ofstream outGlob;
 extern bool DEV_FLAG;
 extern unsigned long global_count;
+extern Param param;
 Node* Node::N = 0x0;
 OverlapsGraph* Node::G = 0x0;
 ReadsStorage * Node::R = 0x0;
@@ -118,7 +119,7 @@ void Node::allocateEdgeFlag() {
         edgeBitsFlag = (unsigned char*) malloc(nOv * sizeof (unsigned char));
 
         for (size_t i = 0; i < nOv; i++)
-            edgeBitsFlag[i] = false;
+            edgeBitsFlag[i] &= 0;
     }
 }
 
@@ -149,22 +150,18 @@ void Node::reallocMemory() {
 void Node::freeMemory() {
     if (ovId != 0x0) {
         free(ovId);
-        //  delete[] ovId;
         ovId = 0x0;
     }
     if (ovSize != 0x0) {
         free(ovSize);
-        //delete[] ovSize;
         ovSize = 0x0;
     }
     if (edgeValue != 0x0) {
         free(edgeValue);
-        //delete[] edgeValue;
         edgeValue = 0x0;
     }
     if (edgeBitsFlag != 0x0) {
         free(edgeBitsFlag);
-        //delete[] edgeBitsFlag;
         edgeBitsFlag = 0x0;
     }
 
@@ -489,9 +486,6 @@ void Node::removeEdge(unsigned int index) {
                 removeEdgeNR(index);
                 removeEdgeNR(rec);
             }
-            //            edgeBitsFlag[rec]=true;
-            //            edgeBitsFlag[index]=true;
-            //            removeMarkedEdge();
             return;
         }
     }
@@ -528,7 +522,6 @@ void Node::removeEdge(unsigned int index) {
         if (rec < pN->nOvRight)
             pN->nOvRight--;
         pN->nOv--;
-
     }
 }
 
@@ -554,7 +547,7 @@ void Node::removeEdges() {
     }
 }
 
-void Node::removeAllEdges() {
+void Node::removeAllEdgesUnRec() {
     //do not take care of the reciprocal edges!
     nOv = nOvRight = 0;
 }
@@ -595,30 +588,7 @@ void Node::setEdgeValue(unsigned int index, float value) {
     pN->edgeValue[rec] = value;
 }
 
-void Node::setEdgeFlag(unsigned int index, bool state) {
-    //mark edge i and its reciprocal
-    Node * pN = &N[ovId[index]];
-    unsigned int rec = getReciprocal(index);
-    if (rec == pN->getNOverlap())
-        cout << " Node::setEdgeFlag(unsigned int index, bool state) problem" << endl;
-    edgeBitsFlag[index] = state;
-    pN->edgeBitsFlag[rec] = state;
-
-}
-
-void Node::setEdgeFlagUnrec(unsigned int index, bool state) {
-    //do not take care of the reciprocal
-    edgeBitsFlag[index] = state;
-}
-
-void Node::initEdgeFlags(bool state) {
-    for (unsigned int i = 0; i < nOv; i++) {
-        edgeBitsFlag[i] = state;
-        // setEdgeFlag(i,state);
-    }
-}
-
-int Node::removeMarkedEdge() {
+int Node::removeMarkedEdgeUnrec(unsigned char BITFLAG) {
     //!does not care of the reciprocal edge!
     //!Must be called on all nodes
 
@@ -626,7 +596,8 @@ int Node::removeMarkedEdge() {
     int N = nOv;
     int p = 0;
     for (unsigned int i = 0; i < nOv; i++) {
-        if (getEdgeFlag(i) == false) //=edge to keep
+        // if (getEdgeFlag(i) == false) //=edge to keep
+        if (getEdgeFlag(i, BITFLAG) == 0) //=edge to keep
         {
             ovId[p] = ovId[i];
             ovSize[p] = ovSize[i];
@@ -654,7 +625,7 @@ int Node::removeEdgesByValue(float suspectCutoff, float GIncoherentCutoff) {
     //!does not care of the reciprocal edge!
     //!must be called on all nodes
 
-    int R = nOvRight;
+    int nRight = nOvRight;
     int N = nOv;
     int p = 0;
 
@@ -664,20 +635,20 @@ int Node::removeEdgesByValue(float suspectCutoff, float GIncoherentCutoff) {
     //    path.push_back(getThisId());
     //    path.push_back(0);
     //    unsigned int rl=this->R->getReadsLength();
-    string right, left, seq1, seq2;
-    unsigned int endRead = L->getEnd(getLayout());
-    if (L->getDirection(endRead))
-        right = L->getDirectRead(endRead);
-    else
-        right = L->getReverseRead(endRead);
-
-    endRead = L->getBegin(getLayout());
-    if (L->getDirection(endRead))
-        left = L->getReverseRead(endRead);
-    else
-        left = L->getDirectRead(endRead);
-
-    NodeIt nIt, nIt2;
+    //    string right, left, seq1, seq2;
+    //    unsigned int endRead = L->getEnd(getLayout());
+    //    if (L->getDirection(endRead))
+    //        right = L->getDirectRead(endRead);
+    //    else
+    //        right = L->getReverseRead(endRead);
+    //
+    //    endRead = L->getBegin(getLayout());
+    //    if (L->getDirection(endRead))
+    //        left = L->getReverseRead(endRead);
+    //    else
+    //        left = L->getDirectRead(endRead);
+    //
+    //    NodeIt nIt, nIt2;
 
     for (unsigned int i = 0; i < nOv; i++) {
         //        outGlob << ">" << getThisId() << "->" << this->ovId[i] << "_" << getOverlapSize(i) << '_';
@@ -703,8 +674,15 @@ int Node::removeEdgesByValue(float suspectCutoff, float GIncoherentCutoff) {
 
         // if ( (getEdgeValue(i) < suspectCutoff && getEdgeFlag(i)==false) || (getEdgeValue(i) < GIncoherentCutoff && getEdgeFlag(i)==false))
         if ((getEdgeValue(i) < suspectCutoff
-                && getEdgeFlag(i) == false)
+                && getEdgeFlag(i, FLAG_A) == false)
                 || getEdgeValue(i) < GIncoherentCutoff) {//false positive edge
+
+            //safeguard never cut overlap >= .95*readLength
+
+            //            if (getOverlapSize(i) >= (unsigned int) ( R->readsLength *.95))
+            //            {
+            //                continue;
+            //            }
 
             //            outGlob << ">node" << getThisId() << "to" << this->getOverlapId(i) << " " << this->getOverlapSize(i) << "\n";
             //            path[2]=i;
@@ -714,36 +692,41 @@ int Node::removeEdgesByValue(float suspectCutoff, float GIncoherentCutoff) {
             //            outGlob << seq << '\n';
 
             if (i < nOvRight)
-                R--;
+                nRight--;
             N--;
         } else {
             ovId[p] = ovId[i];
             ovSize[p] = ovSize[i];
-            // edgeBitsFlag[p]=edgeBitsFlag[i];
-            edgeBitsFlag[p] = false; //set back to default value
+
+            //edgeBitsFlag[p] &= ~FLAG_A;
+            unsetEdgeFlagUnrec(p, FLAG_A);
             edgeValue[p] = edgeValue[i];
             p++;
         }
     }
 
     int nRemoved = nOv - N;
-    nOvRight = R;
+    nOvRight = nRight;
     nOv = N;
     return nRemoved;
 }
 
 //compute edges prob by sampling maxD bp around
 
-void Node::computeEdgesProb(unsigned int maxD, unsigned int maxN, double reliableCutoff) {
+void Node::computeEdgesProb(unsigned int maxD, double reliableCutoff) {
     //reliableCutoff: used to flag edges that are, or have at least one reliable brother
+
+    //sample requirements. 
+    unsigned int minSampleSize = 25;
+    unsigned int minSampledLength = 50;
 
     unsigned int distr1[512];
     unsigned int distr2[512];
-    unsigned int nOhSampled1=0;
-    unsigned int nOhSampled2=0;
+
     unsigned int oh;
-    unsigned int totSample1 = 0, sum1 = 0, totSample2 = 0, sum2 = 0;
-    double prob, mean;
+    unsigned int sampleSize1 = 0, sum1 = 0, sampleSize2 = 0, sum2 = 0;
+    unsigned int nonNullSampleSize1 = 0, nonNullSampleSize2 = 0;
+    double prob, mean, meanNonNull;
     unsigned int rl = R->getReadsLength();
     bool done = false;
     NodeIt nIt, nextIt;
@@ -754,9 +737,10 @@ void Node::computeEdgesProb(unsigned int maxD, unsigned int maxN, double reliabl
 
         nIt.initNodeIt(getThisId(), sampleDir);
         bool atLeastOneReliable = false; //means at least one reliable on each side of the edge
-        // a G-incoherent edge should be accompanied by G-coherent edges
+        // a G-incoherent edge should be accompanied by another G-coherent edges
 
         while (nIt.getNext(nextIt) != 0) {
+
             if (getEdgeValue(nextIt.getAbsArrivalEdgeIndex()) >= reliableCutoff)
                 atLeastOneReliable = true;
 
@@ -774,35 +758,56 @@ void Node::computeEdgesProb(unsigned int maxD, unsigned int maxN, double reliabl
             if (!done) {
                 //sample this
                 memset(distr1, 0, rl * sizeof (unsigned int));
-                nOhSampled1 = sampleOverHangs(!sampleDir, maxD, maxN, distr1);
-                totSample1 = sum1 = 0;
+                sampleOverHangs(!sampleDir, maxD, distr1);
+                sampleSize1 = sum1 = 0;
                 for (unsigned int i = 0; i < rl; i++) {
-                    totSample1 += distr1[i];
+                    sampleSize1 += distr1[i];
                     sum1 += i * distr1[i];
                 }
+
+                nonNullSampleSize1 = sampleSize1 - distr1[0];
 
                 done = true;
             }
             memset(distr2, 0, rl * sizeof (unsigned int));
-            nOhSampled2 = nextIt.pNode->sampleOverHangs(nextIt.dir, maxD, maxN, distr2);
+            nextIt.pNode->sampleOverHangs(nextIt.dir, maxD, distr2);
 
-            totSample2 = sum2 = 0;
+            sampleSize2 = sum2 = 0;
             for (unsigned int i = 0; i < rl; i++) {
-                totSample2 += distr2[i];
+                sampleSize2 += distr2[i];
                 sum2 += i * distr2[i];
             }
+            nonNullSampleSize2 = sampleSize2 - distr2[0];
 
-            totSample2 += totSample1;
-            sum2 += sum1;
-            nOhSampled2 += nOhSampled1;
+            sampleSize2 += sampleSize1;
+            nonNullSampleSize2 += nonNullSampleSize1;
+            sum2 += sum1; //note: sum2 is equivalent to sampled length
+
             oh = rl - nextIt.getArrivalEdgeSize();
 
-            if (totSample2 < 25) {
+            if (sampleSize2 < minSampleSize || sum2 < minSampledLength) {
                 setEdgeValue(nextIt.getAbsArrivalEdgeIndex(), 2.0); //canceled  
             } else {
-                mean = (double) sum2 / totSample2;
-                prob = cdfOH(1.0 / (mean + 1), oh, (double) totSample2 / nOhSampled2);
-                //  prob = cdfOH(1.0 / (mean + 1), oh, 1.0);
+
+                mean = (double) sum2 / sampleSize2;
+                meanNonNull = (double) sum2 / nonNullSampleSize2;
+
+                //add pseudocount: add two overhanging sizes of 2
+                if (meanNonNull == 1.0) {
+                    meanNonNull = (double) (nonNullSampleSize2 + 4) / (double) (nonNullSampleSize2 + 2);
+                }
+
+                //this one consider all overhanging size, including oh=0;
+                //prob = cdfShiftedGeom(1.0 / (mean + 1), oh);
+
+                //this one only consider overhanging size >=1
+                //safer in case of reads dataset displaying bias of overrepresented reads or inserts
+
+                if (param.contextualCleaning != "former")
+                    prob = cdfShiftedGeom(1.0 / (meanNonNull), oh);
+                else
+                    prob = cdfGeom(1.0 / mean, oh);
+
                 if (prob >= reliableCutoff)
                     atLeastOneReliable = true;
                 setEdgeValue(nextIt.getAbsArrivalEdgeIndex(), prob);
@@ -812,7 +817,8 @@ void Node::computeEdgesProb(unsigned int maxD, unsigned int maxN, double reliabl
         if (atLeastOneReliable == false) {
             nIt.initNodeIt(getThisId(), sampleDir);
             while (nIt.getNext(nextIt) != 0) {
-                setEdgeFlag(nextIt.getAbsArrivalEdgeIndex(), true);
+                // setEdgeFlag(nextIt.getAbsArrivalEdgeIndex(), true);
+                setEdgeFlag(nextIt.getAbsArrivalEdgeIndex(), FLAG_A);
             }
         }
         sampleDir = !sampleDir;
@@ -878,11 +884,12 @@ unsigned int Node::bubble(bool dir, double minCov) {
 
 unsigned int Node::sampleOverHangs(bool direction,
         unsigned int maxD,
-        unsigned int maxN,
         unsigned int *distr) {
-    nodeList.clear();
 
-    unsigned int v = sampleOverHangsRec(direction, maxD, maxN, 0, 0, distr);
+    nodeList.clear();
+    unsigned int v;
+
+    v = sampleOverHangsR(direction, maxD, 0, distr);
 
     for (size_t i = 0; i < nodeList.size(); i++)
         N[nodeList.at(i)].unsetVisited();
@@ -890,87 +897,69 @@ unsigned int Node::sampleOverHangs(bool direction,
     return v;
 }
 
-unsigned int Node::sampleOverHangsRec(bool direction,
+//model used since v3.131126
+//only overhangs >=1 (as edges are) are sample
+//do not only choose most covered neighbor
+
+unsigned int Node::sampleOverHangsR(bool direction,
         unsigned int maxD,
-        unsigned int maxN,
         unsigned int currentD,
-        unsigned int currentN,
         unsigned int *distr) {
-    unsigned int nOH;
+    unsigned int nSampledOverlap;
     unsigned int nodeLength = L->getSequenceLength(getLayout());
 
     nodeList.push_back(getThisId()); //memorize marked nodes
     setVisited();
 
-    nOH = L->sampleOH(getLayout(), direction, maxD - currentD, maxN - currentN, distr);
+    nSampledOverlap = L->sampleOH(getLayout(), direction, maxD - currentD, distr);
 
     currentD += nodeLength - R->getReadsLength() + 1; //only if node fully sampled, but not an issue
-    currentN += nOH;
 
-    if (currentD < maxD && currentN < maxN) {//sample further
-
+    //sample further
+    if (currentD < maxD) {
         NodeIt nIt, nextIt;
         Node* nodeMem = 0x0;
         nIt.initNodeIt(getThisId(), direction);
 
-        double cov, maxCov = 0.0;
-        while (nIt.getNext(nextIt)) { //chose the one to go one
-            // -> avoid recursion on all neighbors
+        // double cov, maxCov = 0.0;
+        int ovlp, maxOvlp = 0;
+        unsigned int neighLenght, maxNeighLength = 0;
 
-            if (nextIt.pNode->isVisited())
-                continue;
+        //chose a single neighbor to go on
+        //first, larger overlap, second longest neighbor
+        while (nIt.getNext(nextIt)) {
+            ovlp = nextIt.getArrivalEdgeSize();
+            //  cov = nextIt.getCoverage();
+            neighLenght = nextIt.getNodeLength();
 
-            cov = nextIt.getCoverage();
-            if (cov > maxCov) {
-                maxCov = cov;
-                nodeMem = nextIt.pNode;
+            if (ovlp >= maxOvlp) {
+                maxOvlp = ovlp;
+                if (ovlp > maxOvlp)
+                    maxNeighLength = 0;
+
+                if (neighLenght > maxNeighLength) {
+                    maxNeighLength = neighLenght;
+                    nodeMem = nextIt.pNode;
+                }
             }
         }
 
         if (nodeMem != 0x0) {
             nodeList.push_back(nodeMem->getThisId());
             nodeMem->setVisited();
-            nOH += nodeMem->sampleOverHangsRec(nextIt.dir,
+
+            //add current edge to sample
+            distr[R->getReadsLength() - maxOvlp]++;
+            nSampledOverlap++;
+
+            nSampledOverlap += nodeMem->sampleOverHangsR(nextIt.dir,
                     maxD,
-                    maxN,
-                    // currentD-nextIt.getArrivalEdgeSize(),
                     currentD,
-                    currentN,
                     distr);
         }
-
-        //        //recursion loop
-        //        while (nIt.getNext(nextIt))
-        //        {
-        //            if (nextIt.pNode->isTraversed())
-        //                continue;
-        //            else
-        //            {
-        //                nodeList.push_back(nextIt.getNodeId());
-        //                nextIt.pNode->setTraversed();
-        //            }
-        //
-        //            //Sampling interNode overHanging
-        //            //may introduce spurious oh
-        //            //oh=R->getReadsLength()-nextIt.getArrivalEdgeSize();
-        //            //distr[oh]++;
-        //            //nOH++;
-        //            //currentN++;
-        //            //currentD+=oh;
-        //            
-        //            
-        //            nOH+=nextIt.pNode->sampleOverHangsRec(nextIt.dir,
-        //                                                  maxD,
-        //                                                  maxN,
-        //                                                 // currentD-nextIt.getArrivalEdgeSize(),
-        //                                                  currentD,
-        //                                                  currentN,
-        //                                                  distr);
-        //        }
     }
 
-
-    return nOH;
+    return nSampledOverlap;
 }
 
 bool Node::testReciprocal() {
@@ -1008,7 +997,7 @@ bool Node::testReciprocal() {
                     passed = false;
                 }
             }
-            if (edgeBitsFlag[i] != N[ovId[i]].getEdgeFlag(index)) {
+            if (edgeBitsFlag[i] != N[ovId[i]].edgeBitsFlag[index]) {
                 cout << "node: " << getThisId() << " edgeIndex:" << i << " to node: " << ovId[i] << " edge flag problem" << endl;
                 cout << "size: " << this->getOverlapSize(i);
                 if (i < nOvRight)
@@ -1116,23 +1105,26 @@ void Node::overlapSizeCutoff(unsigned int cutoff) {
     //must be called on for ALL nodes
 
     for (size_t i = 0; i < nOv; i++)
-        edgeBitsFlag[i] = false;
+        unsetEdgeFlagUnrec(i, FLAG_D);
+    // edgeBitsFlag[i] = false;
 
     //right
     for (unsigned int i = 0; i < getNRightOverlap(); i++) {
         if (getRightOverlapSize(i) < cutoff) {
-            edgeBitsFlag[i] = true;
+            setEdgeFlagUnrec(i, FLAG_D);
+            // edgeBitsFlag[i] = true;
         }
     }
 
     //left
     for (unsigned int i = 0; i < getNLeftOverlap(); i++) {
         if (getLeftOverlapSize(i) < cutoff) {
-            edgeBitsFlag[i + nOvRight] = true;
+            setEdgeFlagUnrec(i + nOvRight, FLAG_D);
+            // edgeBitsFlag[i + nOvRight] = true;
         }
     }
 
-    removeMarkedEdge();
+    removeMarkedEdgeUnrec(FLAG_D);
 }
 
 void Node::removeShortBranchingOverlaps(unsigned int cutoff) {
@@ -1175,10 +1167,10 @@ void Node::markTransitiveEdges() {
     for (unsigned int i = 0; i < getNRightOverlap(); i++) {
         getNeighbor(true, i, id, size, direction);
 
-        if (N[id].isVisited(direction))
+        if (N[id].isInplay(direction))
             N[id].setMultipleEdges(direction); //indicate multiple incoming edges
         else
-            N[id].setVisited(direction);
+            N[id].setInplay(direction);
     }
 
     longestOH = R->getReadsLength() - size; //longest overhanging
@@ -1211,7 +1203,7 @@ void Node::markTransitiveEdges() {
                         cout << "";
 
                     edgeBitsFlag[edgeIndex] = true;
-                } else if (N[idB].isVisited(directionB))
+                } else if (N[idB].isInplay(directionB))
                     N[idB].setEliminated(directionB);
             }
         }
@@ -1226,18 +1218,19 @@ void Node::markTransitiveEdges() {
 
     for (unsigned int i = 0; i < getNRightOverlap(); i++) {
         getNeighbor(true, i, id, size, direction);
-        //  N[id].flagsBit&=0;
-        N[id].flagsBit &= ~254;
+        // N[id].flagsBit&=0;
+        //N[id].flagsBit &= ~254;
+        N[id].initTransitiveReductionFlags();
     }
 
 
     for (unsigned int i = 0; i < getNLeftOverlap(); i++) {
         getNeighbor(false, i, id, size, direction);
 
-        if (N[id].isVisited(direction))
+        if (N[id].isInplay(direction))
             N[id].setMultipleEdges(direction); //indicate multiple incoming edges
         else
-            N[id].setVisited(direction);
+            N[id].setInplay(direction);
     }
 
     longestOH = R->getReadsLength() - size; //longest overhanging
@@ -1270,7 +1263,7 @@ void Node::markTransitiveEdges() {
                         cout << "";
 
                     edgeBitsFlag[edgeIndex] = true;
-                } else if (N[idB].isVisited(directionB))
+                } else if (N[idB].isInplay(directionB))
                     N[idB].setEliminated(directionB);
             }
         }
@@ -1286,71 +1279,18 @@ void Node::markTransitiveEdges() {
     for (unsigned int i = 0; i < getNLeftOverlap(); i++) {
         getNeighbor(false, i, id, size, direction);
         // N[id].flagsBit&=0;
-        N[id].flagsBit &= ~254;
+        //N[id].flagsBit &= ~254;
+        N[id].initTransitiveReductionFlags();
     }
 }
 
-
-//void Node::markTransitiveEdges()
-//{ //naive algorithm
-//    //mark transitive edges
-//    unsigned int i,j;
-//
-//    //right overlaps
-//    i=0;
-//
-//    while ( i+1 < getNRightOverlap() )
-//    {
-//        if (getEdgeFlag(i)==false)
-//        {
-//            j=i+1;
-//
-//            while (j < getNRightOverlap() )
-//            {
-//                if (getEdgeFlag(i)==false && getOverlapSize(i) != getOverlapSize(j))
-//                {
-//                    if (areConsistentR(i,j))
-//                    {
-//                       // cout << "node: " << getThisId() << " edge: " << j << " flagged" << endl;
-//                        edgeBitsFlag[j]=true;
-//                    }
-//                }
-//                j++;
-//            }
-//        }
-//        i++;
-//    }
-//
-//    //left overlaps
-//    i=0;
-//
-//    while ( i+1 < getNLeftOverlap() )
-//    {
-//        if (getEdgeFlag(i+nOvRight)==false)
-//        {
-//            j=i+1;
-//            while (j < getNLeftOverlap() )
-//            {
-//                if (getEdgeFlag(j+nOvRight)==false && getOverlapSize(i+nOvRight) != getOverlapSize(j+nOvRight))
-//                {
-//                    if (areConsistentL(i,j))
-//                    {
-//                       // cout << "node: " << getThisId() << " edge: " << j << " flagged" << endl;
-//                        edgeBitsFlag[j+nOvRight]=true;
-//                    }
-//                }
-//                j++;
-//            }
-//        }
-//        i++;
-//    }
-//}
-
 void Node::initDot(ostream &out) {
+
     for (unsigned int i = 0; i <= nNodes; i++) {
         N[i].unsetVisited();
         N[i].unsetTargeted();
-        N[i].initEdgeFlags(false);
+        //N[i].initEdgeFlags(false);
+        N[i].unsetAllEdgeFlags(FLAG_B);
     }
 
     Node::dotNodeList.clear();
@@ -1361,7 +1301,7 @@ void Node::initDot(ostream &out) {
 
 void Node::dotAround(ostream &out, int depthLimit, int currentDepth) {
     unsigned int id, size;
-    bool direction=true;
+    bool direction = true;
 
     //avoid cycling  
     if (isVisited() == true) {
@@ -1382,18 +1322,22 @@ void Node::dotAround(ostream &out, int depthLimit, int currentDepth) {
         getOverlap(i, id, size, direction);
 
         //already drawn
-        if (edgeBitsFlag[i] == true)
+        //  if (edgeBitsFlag[i] == true)
+        if (getEdgeFlag(i, FLAG_B) == 1)
             continue;
-        setEdgeFlag(i, true);
+        //setEdgeFlag(i, true);
+        setEdgeFlag(i, FLAG_B);
 
         out << getThisId() << " -> " << id;
         out << " [label = \"" << size << "\\n";
         out << setprecision(2) << getEdgeValue(i) << "\\n";
 
-        //        if (getEdgeFlag(i))
-        //            out << "T";
-        //        else
-        //            out << "F";
+        //output FLAG_A state
+        if (getEdgeFlag(i, FLAG_A) == 1)
+            out << "T";
+        else
+            out << "F";
+
         out << "\", ";
         out << " arrowsize = 0.7,";
 
@@ -1412,10 +1356,6 @@ void Node::dotAround(ostream &out, int depthLimit, int currentDepth) {
             out << "arrowhead = normal];\n";
         else
             out << "arrowhead = inv];\n";
-
-
-
-
     }
 
     for (size_t i = 0; i < this->getNOverlap(); i++) {
@@ -1429,7 +1369,8 @@ void Node::closeDot(ostream& out) {
     for (vector<unsigned int>::iterator it = Node::dotNodeList.begin(); it != Node::dotNodeList.end(); it++) {
         bool missingEdges = false;
         for (unsigned int i = 0; i < N[*it].getNOverlap(); i++) {
-            if (N[*it].edgeBitsFlag[i] == false) {
+            //if (N[*it].edgeBitsFlag[i] == false) {
+            if (N[*it].getEdgeFlag(i, FLAG_B) == 0) {
                 missingEdges = true;
                 break;
             }
@@ -1455,7 +1396,8 @@ void Node::closeDot(ostream& out) {
 
     for (vector<unsigned int>::iterator it = Node::dotNodeList.begin(); it != Node::dotNodeList.end(); it++) {
         N[*it].unsetVisited();
-        N[*it].initEdgeFlags(false);
+        //N[*it].initEdgeFlags(false);
+        N[*it].unsetAllEdgeFlags(FLAG_B);
     }
 
     out << "}\n";
@@ -1463,54 +1405,61 @@ void Node::closeDot(ostream& out) {
 
 void Node::dotLocalGraph(int depth, string fileName) {
 
-    for (unsigned int i = 0; i <= nNodes; i++) {
-        N[i].unsetVisited();
-        N[i].initEdgeFlags(false);
-    }
-
-    Node::dotNodeList.clear();
+    //    for (unsigned int i = 0; i <= nNodes; i++) {
+    //        N[i].unsetVisited();
+    //       // N[i].initEdgeFlags(false);
+    //        N[i].unsetEdgeFlagsNew(FLAG_B);
+    //    }
+    //
+    //    Node::dotNodeList.clear();
 
     ofstream out((fileName + ".dot").c_str());
+    initDot(out);
+    dotAround(out, depth);
+    closeDot(out);
 
-    out << "digraph overlapGraph {\n";
-    //out << "size=\"8,10\";" << endl;
-    out << "node [shape = ellipse,fontsize = 7];\n";
-    out << "edge [dir=both];\n";
+    //    out << "digraph overlapGraph {\n";
+    //    //out << "size=\"8,10\";" << endl;
+    //    out << "node [shape = ellipse,fontsize = 7];\n";
+    //    out << "edge [dir=both];\n";
 
-    writeDotGraph(out, depth, 0);
+    // writeDotGraph(out, depth, 0);
 
-    for (vector<unsigned int>::iterator it = Node::dotNodeList.begin(); it != Node::dotNodeList.end(); it++) {
+    //    for (vector<unsigned int>::iterator it = Node::dotNodeList.begin(); it != Node::dotNodeList.end(); it++) {
+    //
+    //        bool missingEdges = false;
+    //        for (unsigned int i = 0; i < N[*it].getNOverlap(); i++) {
+    //           // if (N[*it].edgeBitsFlag[i] == false) {
+    //            if (N[*it].getEdgeFlagNew(i,FLAG_B) == 0) { //0=false
+    //                missingEdges = true;
+    //                break;
+    //            }
+    //        }
+    //
+    //        out << *it << " [";
+    //        out << "label = \""
+    //                << *it << "\\nl="
+    //                << N[*it].getSequenceLength()
+    //                << " c=" << N[*it].getCoverage()
+    //                // << " " << (int)N[*it].value 
+    //                << "\"";
+    //        if (missingEdges)
+    //            out << " style = dashed";
+    //        out << "]\n";
+    //
+    //    }
+    //
+    //    for (vector<unsigned int>::iterator it = Node::dotNodeList.begin(); it != Node::dotNodeList.end(); it++) {
+    //        N[*it].unsetVisited();
+    //        N[*it].initEdgeFlags(false);
+    //    }
 
-        bool missingEdges = false;
-        for (unsigned int i = 0; i < N[*it].getNOverlap(); i++) {
-            if (N[*it].edgeBitsFlag[i] == false) {
-                missingEdges = true;
-                break;
-            }
-        }
+    //    out << "}\n";
 
-        out << *it << " [";
-        out << "label = \""
-                << *it << "\\nl="
-                << N[*it].getSequenceLength()
-                << " c=" << N[*it].getCoverage()
-                // << " " << (int)N[*it].value 
-                << "\"";
-        if (missingEdges)
-            out << " style = dashed";
-        out << "]\n";
-
-    }
-
-    for (vector<unsigned int>::iterator it = Node::dotNodeList.begin(); it != Node::dotNodeList.end(); it++) {
-        N[*it].unsetVisited();
-        N[*it].initEdgeFlags(false);
-    }
-
-    out << "}\n";
     out.close();
     out.clear();
 
+    //launch graphviz
     string command = "dot -Tps -o ";
     command += fileName + ".ps " + fileName + ".dot";
     cout << "executing " << command << " ... " << flush;
@@ -1518,60 +1467,6 @@ void Node::dotLocalGraph(int depth, string fileName) {
     unused = system(command.c_str());
     cout << "done" << endl;
 
-}
-
-void Node::writeDotGraph(ostream &out, int &depthLimit, int currentDepth) {
-    unsigned int id, size;
-    bool direction=true;
-
-    //avoid cycling  
-    if (isVisited() == true) {
-        return;
-    }
-
-    Node::dotNodeList.push_back(getThisId());
-
-    if (currentDepth == depthLimit)
-        return;
-
-    setVisited();
-    currentDepth++;
-
-    for (size_t i = 0; i < this->getNOverlap(); i++) {
-        getOverlap(i, id, size, direction);
-
-        //already drawn
-        if (edgeBitsFlag[i] == true)
-            continue;
-        setEdgeFlag(i, true);
-
-        out << getThisId() << " -> " << id;
-        out << " [label = \"" << size << "\\n";
-        out << setprecision(2) << getEdgeValue(i) << "\\n";
-
-        //        if (getEdgeFlag(i))
-        //            out << "T";
-        //        else
-        //            out << "F";
-        out << "\", ";
-        out << " arrowsize = 0.7,";
-
-        if (i >= nOvRight) {
-            direction = !direction;
-            out << "arrowtail = normal,";
-        } else
-            out << "arrowtail = inv,";
-
-        if (direction)
-            out << "arrowhead = normal];\n";
-        else
-            out << "arrowhead = inv];\n";
-    }
-
-    for (size_t i = 0; i < this->getNOverlap(); i++) {
-        getOverlap(i, id, size, direction);
-        N[id].writeDotGraph(out, depthLimit, currentDepth);
-    }
 }
 
 unsigned int Node::getLongestNonAmbiguousPath(string &s, vector<unsigned int> &coverage, unsigned int &leftId, bool &leftDir, unsigned int &rightId, bool &rightDir) {
@@ -1671,9 +1566,11 @@ unsigned int Node::getLongestNonAmbiguousPath(string &s, vector<unsigned int> &c
             nodeList.push_back(id);
 
             if (state) {
-                myLayout = L->merge(myLayout, N[id].getLayout(), true, L->getSequenceLength(myLayout) - size);
+                myLayout = L->link(myLayout, N[id].getLayout(), true, size);
+                // myLayout = L->merge(myLayout, N[id].getLayout(), true, L->getSequenceLength(myLayout) - size);
             } else {
-                myLayout = L->merge(myLayout, N[id].getLayout(), false, L->getSequenceLength(myLayout) - size);
+                myLayout = L->link(myLayout, N[id].getLayout(), false, size);
+                // myLayout = L->merge(myLayout, N[id].getLayout(), false, L->getSequenceLength(myLayout) - size);
             }
             N[id].setLayout(0);
 

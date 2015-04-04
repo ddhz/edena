@@ -68,18 +68,22 @@ void Param::init() {
     drPairedEndFiles.clear();
     rdPairedEndFiles.clear();
     ovlFile = "";
+    contextualCleaning = "yes";
 
-    contextualCleaning = true;
+
     cleanGraph = true;
     interactiveShell = false;
     discardNonUsable = true;
     discardSuspicousNodes = true;
     cleanBubbles = true;
     trimRed = true;
+    removeDuplicate = false;
+    autoOverlapCutoff = true;
 
     //non documented dev flags
-    writeOSG = false; //write the cleanded and condensed version of the OSG
-    checkGraph = false; //chech graph for consistency
+    writeOSG = false; //write the cleaned and condensed version of the OSG
+    checkGraph = false; //check graph for consistency
+    onlineReduction = false;
 }
 
 void Param::parseCommandLine(int argc, char**argv) {
@@ -99,12 +103,16 @@ void Param::parseCommandLine(int argc, char**argv) {
 
         flag = argv[argn] + 1;
 
-        if (argn > argc-2 && flag != "shell"
+        if (argn > argc - 2 && flag != "shell"
                 && flag != "dev"
                 && flag != "h"
-                && flag != "help") {
-                cerr << "[err] check command line\n";
-                exit(EXIT_FAILURE);
+                && flag != "help"
+                && flag != "wOSG"
+                && flag != "checkGraph"
+                && flag != "oR"
+                && flag != "v") {
+            cerr << "[err] check command line\n";
+            exit(EXIT_FAILURE);
         }
 
         if (flag == "h" || flag == "help") {
@@ -181,8 +189,8 @@ void Param::parseCommandLine(int argc, char**argv) {
             iss.clear();
             iss.str(argv[argn]);
             iss >> trimContigEnds;
-            if (trimContigEnds<0)
-                trimContigEnds=0;
+            if (trimContigEnds < 0)
+                trimContigEnds = 0;
         } else if (flag == "d" || flag == "deadEnds") //for dead-ends removal
         {
             argn++;
@@ -220,11 +228,25 @@ void Param::parseCommandLine(int argc, char**argv) {
             argn++;
             flag = argv[argn];
             if (flag == "no")
-                contextualCleaning = false;
+                contextualCleaning = "no";
             else if (flag == "yes")
-                contextualCleaning = true;
+                contextualCleaning = "yes"; //cc model since 2014
+            else if (flag == "former")
+                contextualCleaning = "former"; //cc model until v3.131028
+                //undocumented
             else {
-                cerr << "\n-contextualCleaning: possible values are \"yes\" and \"no\"\n";
+                cerr << "\n-contextualCleaning: possible values are \"yes\" and \"no\n";
+                exit(EXIT_FAILURE);
+            }
+        } else if (flag == "ao" || flag == "autoOverlaps") {
+            argn++;
+            flag = argv[argn];
+            if (flag == "no")
+                autoOverlapCutoff = false;
+            else if (flag == "yes")
+                autoOverlapCutoff = true;
+            else {
+                cerr << "\n-autoOverlaps: possible values are \"yes\" and \"no\n";
                 exit(EXIT_FAILURE);
             }
         } else if (flag == "clearBubbles") {
@@ -259,6 +281,17 @@ void Param::parseCommandLine(int argc, char**argv) {
             iss.clear();
             iss.str(argv[argn]);
             iss >> truncateTo;
+        } else if (flag == "ddi" || flag == "discardDuplicatedInserts") {
+            argn++;
+            flag = argv[argn];
+            if (flag == "no")
+                removeDuplicate = false;
+            else if (flag == "yes")
+                removeDuplicate = true;
+            else {
+                cerr << "\n-discardDuplicatedInserts: possible values are \"yes\" and \"no\"\n";
+                exit(EXIT_FAILURE);
+            }
         } else if (flag == "nThreads") {
             argn++;
             iss.clear();
@@ -298,6 +331,9 @@ void Param::parseCommandLine(int argc, char**argv) {
         } else if (flag == "dev" || flag == "shell") //undocumented
         {
             interactiveShell = true;
+        } else if (flag == "oR") //undocumented
+        {
+            onlineReduction = true;
         } else if (flag == "v") {
             edenaVersion(cout);
             exit(EXIT_SUCCESS);
@@ -339,6 +375,11 @@ void Param::checkParamConsistency() {
 
     if (!readsProvided && ovlFile == "") {
         cerr << "[err] You must either provide reads file(s) or an ovl file\n";
+        exit(EXIT_FAILURE);
+    }
+
+    if (!readsProvided && removeDuplicate == true) {
+        cerr << "[err] -ddi can only be used during overlapping mode\n";
         exit(EXIT_FAILURE);
     }
 

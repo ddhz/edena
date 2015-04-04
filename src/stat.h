@@ -31,7 +31,7 @@
 using namespace std;
 
 void stats(vector<int>::iterator start, vector<int>::iterator end, ostream &out);
-double cdfOH(double p, unsigned int k, double c); 
-double pdfOH(double p, unsigned int k, double c);
+double cdfShiftedGeom(double p, unsigned int k); 
+double cdfGeom(double p, unsigned int k); 
 
 #endif // STAT_H_INCLUDED

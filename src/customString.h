@@ -49,26 +49,6 @@ inline int r_strcmp(const char* a, const char* b)
 
 }
 
-//test
-inline int my_strcmp(const char* a, const char* b)
-{
-
-    register const unsigned char *s1 = (const unsigned char *) a;
-    register const unsigned char *s2 = (const unsigned char *) b;
-    unsigned char c1, c2;
-
-    do
-    {
-        c1 = (unsigned char) *s1++;
-        c2 = (unsigned char) *s2++;
-        if (c1 == '\0')
-            return c1 - c2;
-    }
-    while (c1 == c2);
-
-    return c1 - c2;
-}
-
 inline bool d_prefixOf(const char *p1, const char *p2)
 {
     while (*p1 != '\0')

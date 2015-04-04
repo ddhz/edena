@@ -25,13 +25,18 @@
 #include "readsStorage.h"
 #include "Pairing.h"
 #include "crc.h"
+#include "logWriter.h"
+
+extern logWriter LOG;
 
 ReadsLayout::ReadsLayout() {
-    
+
     R = 0x0;
     lastIdentical = 0x0;
     next = 0x0;
     previous = 0x0;
+    nextOverHanging = 0x0;
+    previousOverHanging = 0x0;
     nodeId = 0x0;
     position = 0x0;
     flags = 0x0;
@@ -54,12 +59,6 @@ void ReadsLayout::init(ReadsStorage *r, unsigned int n) {
         nodeId = (unsigned int*) malloc((tabSize) * sizeof (unsigned int));
         position = (int*) malloc((tabSize) * sizeof (int));
         flags = (unsigned char*) malloc((tabSize) * sizeof (unsigned char));
-        //        lastIdentical = new unsigned int[tabSize];
-        //        next = new unsigned int[tabSize];
-        //        previous = new unsigned int[tabSize];
-        //        nodeId = new unsigned int[tabSize];
-        //        position = new int[tabSize];
-        //        flags = new unsigned char[tabSize];
     } catch (bad_alloc ex) {
         cout << ex.what() << "\nnot enough memory. ReadsLayout::init(STReads *r)" << '\n';
         exit(0);
@@ -69,50 +68,68 @@ void ReadsLayout::init(ReadsStorage *r, unsigned int n) {
     memset(previous, 0, tabSize * sizeof (unsigned int));
     memset(nodeId, 0, tabSize * sizeof (unsigned int));
     memset(position, 0, tabSize * sizeof (int));
-    memset(flags,0,tabSize * sizeof (unsigned char));
+    memset(flags, 0, tabSize * sizeof (unsigned char));
+}
+
+void ReadsLayout::allocateOverHangingLinks() {
+    //alloc memory 
+
+    if (nextOverHanging == 0x0) {
+        try {
+            nextOverHanging = (unsigned int*) malloc((tabSize) * sizeof (unsigned int));
+            previousOverHanging = (unsigned int*) malloc((tabSize) * sizeof (unsigned int));
+        } catch (bad_alloc ex) {
+            cout << ex.what() << "\nnot enough memory. ReadsLayout::init(STReads *r)" << '\n';
+            exit(0);
+        }
+        memset(nextOverHanging, 0, tabSize * sizeof (unsigned int));
+        memset(previousOverHanging, 0, tabSize * sizeof (unsigned int));
+    }
 }
 
 void ReadsLayout::cleanMemory() {
-    
+
     if (next != 0x0) {
-     //   delete [] next;
         free(next);
         next = 0x0;
     }
     if (previous != 0x0) {
-     //   delete [] previous;
         free(previous);
         previous = 0x0;
     }
+    if (nextOverHanging != 0x0) {
+        free(nextOverHanging);
+        nextOverHanging = 0x0;
+    }
+    if (previousOverHanging != 0x0) {
+        free(previousOverHanging);
+        previousOverHanging = 0x0;
+    }
+
     if (nodeId != 0x0) {
-     //   delete [] nodeId;
         free(nodeId);
         nodeId = 0x0;
     }
     if (position != 0x0) {
-     //   delete [] position;
         free(position);
         position = 0x0;
     }
     if (lastIdentical != 0x0) {
-  //      delete [] lastIdentical;
         free(lastIdentical);
         lastIdentical = 0x0;
     }
     if (flags != 0x0) {
-    //    free(flags);
         delete [] flags;
         flags = 0x0;
     }
 }
 
-void ReadsLayout::save(ostream& out_bin)
-{
+void ReadsLayout::save(ostream& out_bin) {
     unsigned int crcCheck;
     Crc32 CRC;
-  
-    tabSize = R->getEffectiveNReads() + 1;
-    
+
+    tabSize = R->getNumberOfReads() + 1;
+
     CRC.AddData((uint8_t*) & tabSize, sizeof (unsigned int));
     CRC.AddData((uint8_t*) lastIdentical, sizeof (unsigned int) *tabSize);
     CRC.AddData((uint8_t*) next, sizeof (unsigned int) *tabSize);
@@ -121,10 +138,10 @@ void ReadsLayout::save(ostream& out_bin)
     CRC.AddData((uint8_t*) position, sizeof (int) *tabSize);
     CRC.AddData((uint8_t*) flags, sizeof (unsigned char) *tabSize);
 
-    crcCheck=CRC.GetCrc32();
-    
+    crcCheck = CRC.GetCrc32();
+
     out_bin.write((char*) &crcCheck, sizeof (unsigned int));
-      
+
     out_bin.write((char*) &tabSize, sizeof (unsigned int));
     out_bin.write((char*) lastIdentical, sizeof (unsigned int) *tabSize);
     out_bin.write((char*) next, sizeof (unsigned int) *tabSize);
@@ -135,17 +152,17 @@ void ReadsLayout::save(ostream& out_bin)
 }
 
 bool ReadsLayout::load(istream& in_bin, ReadsStorage*r) {
-    
-  
+
+
     unsigned int crcCheck;
     Crc32 CRC;
-    
-    
+
+
     cleanMemory();
     unsigned int tabsize;
 
     in_bin.read((char*) &crcCheck, sizeof (unsigned int));
-    
+
     in_bin.read((char*) &tabsize, sizeof (unsigned int));
 
     init(r, tabsize);
@@ -156,7 +173,7 @@ bool ReadsLayout::load(istream& in_bin, ReadsStorage*r) {
     in_bin.read((char*) nodeId, sizeof (unsigned int) *tabSize);
     in_bin.read((char*) position, sizeof (int) *tabSize);
     in_bin.read((char*) flags, sizeof (unsigned char) *tabSize);
-    
+
     CRC.AddData((uint8_t*) & tabSize, sizeof (unsigned int));
     CRC.AddData((uint8_t*) lastIdentical, sizeof (unsigned int) *tabSize);
     CRC.AddData((uint8_t*) next, sizeof (unsigned int) *tabSize);
@@ -164,31 +181,31 @@ bool ReadsLayout::load(istream& in_bin, ReadsStorage*r) {
     CRC.AddData((uint8_t*) nodeId, sizeof (unsigned int) *tabSize);
     CRC.AddData((uint8_t*) position, sizeof (int) *tabSize);
     CRC.AddData((uint8_t*) flags, sizeof (unsigned char) *tabSize);
-    
-    unsigned int crc2=CRC.GetCrc32();
-    
+
+    unsigned int crc2 = CRC.GetCrc32();
+
     if (crc2 != crcCheck)
         return false;
-    
+
     return true;
 }
 
-void ReadsLayout::initLayout(size_t layout, int pos, bool dir, unsigned int nodeId) {
-    
+void ReadsLayout::initLayout(size_t layout, bool dir, unsigned int nodeId) {
+
     if (getNext(layout) != 0 || getPrevious(layout) != 0) {
         cout << "void ReadsLayout::initLayout(size_t layout, int pos, bool dir, unsigned int nodeId) problem\n";
         cout << "layout=" << layout << " next=" << getNext(layout) << " previous=" << getPrevious(layout) << endl;
-        cout << "layout-1=" << layout-1 << " next=" << getNext(layout-1) << " previous=" << getPrevious(layout-1) << endl;
-        cout << "layout+1=" << layout+1 << " next=" << getNext(layout+1) << " previous=" << getPrevious(layout+1) << endl;
+        cout << "layout-1=" << layout - 1 << " next=" << getNext(layout - 1) << " previous=" << getPrevious(layout - 1) << endl;
+        cout << "layout+1=" << layout + 1 << " next=" << getNext(layout + 1) << " previous=" << getPrevious(layout + 1) << endl;
         sendBugReportPlease(cerr);
     }
 
-    setPosition(layout, pos, dir);
+    setPosition(layout, 1, dir);
     setNodeId(layout, nodeId);
 }
 
 void ReadsLayout::setLayoutNodeId(size_t layout, unsigned int nodeId) {
-    
+
     if (getNext(layout) != 0) {
         cout << "void ReadsLayout::setLayoutNodeId(size_t layout, unsigned int nodeId) problem\n";
         sendBugReportPlease(cerr);
@@ -202,38 +219,54 @@ void ReadsLayout::setLayoutNodeId(size_t layout, unsigned int nodeId) {
 }
 
 string ReadsLayout::getDirectRead(size_t i) const {
-    
+
     char s[1000];
-    R->getDirectSequence(s,i);
+    R->getDirectSequence(s, i);
     return s;
 }
 
 string ReadsLayout::getReverseRead(size_t i) const {
-    
+
     char s[1000];
-    R->getReverseSequence(s,i);
+    R->getReverseSequence(s, i);
     return s;
 }
 
-void ReadsLayout::getPCharRead(char *dest ,size_t i, bool dir) const {
+void ReadsLayout::getPCharRead(char *dest, size_t i, bool dir) const {
 
     if (dir)
-        R->getDirectSequence(dest,i);
+        R->getDirectSequence(dest, i);
     else
-        R->getReverseSequence(dest,i);
+        R->getReverseSequence(dest, i);
+}
+
+unsigned int ReadsLayout::getMultiplicity(size_t i) {
+    return R->getMultiplicity(R->getNrReadId(i));
 }
 
 size_t ReadsLayout::getBegin(size_t index) const {
-    
-    while (getPrevious(index) != 0) {
-        index = getPrevious(index);
+
+    if (nextOverHanging == 0x0) {
+        while (getPrevious(index) != 0) {
+            index = getPrevious(index);
+        }
+    } else {
+
+        while (previousOverHanging[index] != 0) {
+            index = previousOverHanging[index];
+        }
+
+        //enumerate possible remaining equivalent reads
+        while (getPrevious(index) != 0) {
+            index = getPrevious(index);
+        }
     }
 
     return index;
 }
 
 size_t ReadsLayout::getEnd(size_t index) const {
-    
+
     while (getNext(index) != 0) {
         index = getNext(index);
     }
@@ -242,7 +275,7 @@ size_t ReadsLayout::getEnd(size_t index) const {
 }
 
 size_t ReadsLayout::reverseComplement(size_t index) {
-    
+
     if (getNext(index) != 0) {
         cout << "size_t ReadsLayout::reverseComplement(size_t index) problem\n";
         sendBugReportPlease(cerr);
@@ -264,6 +297,10 @@ size_t ReadsLayout::reverseComplement(size_t index) {
 
     } while (index != 0);
 
+    //update overHanging links
+    if (nextOverHanging != 0x0)
+        buildOverHangingLinks(previous);
+
     return previous;
 }
 
@@ -274,7 +311,7 @@ size_t ReadsLayout::reverseComplement(size_t index) {
 // (shift is zero based)
 
 size_t ReadsLayout::merge(size_t l1, size_t l2, bool direct, int shift) {
-    
+
     if (getNext(l1) != 0 || getNext(l2) != 0 || l1 == 0 || l2 == 0) {
         cout << "size_t ReadsLayout::merge(size_t l1, size_t l2, bool direct, int shift) problem\n";
         sendBugReportPlease(cerr);
@@ -302,6 +339,9 @@ size_t ReadsLayout::merge(size_t l1, size_t l2, bool direct, int shift) {
     size_t p2 = l2;
 
 
+    //......................p1
+    //      ......................p2
+    //                      |<<<<<<
     while (getPosition(getPrevious(p2)) >= getPosition(p1)) {
         p2 = getPrevious(p2);
     }
@@ -316,6 +356,7 @@ size_t ReadsLayout::merge(size_t l1, size_t l2, bool direct, int shift) {
         l1 = l2;
     }
 
+    //this part is actually never used
     while (p2 != 0) {
         if (getPosition(p2) >= getPosition(p1)) {
             //insert p2 after p1
@@ -330,10 +371,63 @@ size_t ReadsLayout::merge(size_t l1, size_t l2, bool direct, int shift) {
             p2 = pTmp;
         } else
             p1 = getPrevious(p1);
-
     }
 
     return l1;
+}
+
+// link relative to l1:
+// ovSize \in [ 1,readLenght-1 ]
+
+size_t ReadsLayout::link(size_t l1, size_t l2, bool direct, int ovSize) {
+
+    if (ovSize < 1 || ovSize >= R->getReadsLength()) {
+        LOG.oss << "[bug] size_t ReadsLayout::link(size_t l1, size_t l2, bool direct, int ovsize)";
+        LOG.flushStream(TOSTDERR);
+        sendBugReportPlease(cerr);
+    }
+    size_t pTmp;
+
+    if (direct == false) {
+        l2 = reverseComplement(l2);
+    }
+
+    unsigned int shift = getSequenceLength(l1) - ovSize;
+    pTmp = l2;
+    while (pTmp != 0) {
+        setPosition(pTmp, getPosition(pTmp) + shift);
+        pTmp = getPrevious(pTmp);
+    }
+
+    size_t beginl2 = getBegin(l2);
+
+    setPrevious(beginl2, l1);
+    setNext(l1, beginl2);
+
+    size_t current;
+    size_t nextP;
+
+    if (nextOverHanging != 0x0) {
+        current = l1;
+        nextP = getPrevious(current);
+
+        while (getPosition(current) == getPosition(nextP)) {
+            current = nextP;
+            nextP = getPrevious(current);
+        }
+
+        nextOverHanging[current] = beginl2;
+
+        current = beginl2;
+        nextP = getNext(current);
+        while (getPosition(current) == getPosition(nextP)) {
+            current = nextP;
+            nextP = getNext(current);
+        }
+        previousOverHanging[current] = l1;
+    }
+
+    return l2;
 }
 
 bool ReadsLayout::isUniDirectional(size_t index) const {
@@ -352,7 +446,7 @@ bool ReadsLayout::isUniDirectional(size_t index) const {
 }
 
 unsigned int ReadsLayout::getSequenceLength(size_t listIndex) const {
-    
+
     return getPosition(listIndex) + R->getReadsLength() - 1;
 }
 
@@ -372,10 +466,6 @@ unsigned int ReadsLayout::getNReads(size_t listIndex) const {
 
     return count;
 
-}
-
-unsigned int ReadsLayout::getNext(size_t i) const {
-    return next[i];
 }
 
 int ReadsLayout::getPosition(size_t i) const {
@@ -440,28 +530,38 @@ string ReadsLayout::getSequence(size_t listIndex) {
     unsigned int ov;
     size_t index = getBegin(listIndex);
 
+    unsigned int (ReadsLayout::*nextIt)(size_t) const = NULL;
+
+    if (nextOverHanging != 0x0)
+        nextIt = &ReadsLayout::getNextOverHanging;
+    else
+        nextIt = &ReadsLayout::getNext;
+
     if (getDirection(index))
         s = getDirectRead(index);
     else
         s = getReverseRead(index);
 
-    index = getNext(index);
+    //index = getNext(index);
+    index = ((*this).*nextIt)(index);
+
     pos = R->getReadsLength();
     while (index != 0) {
         ov = pos - getPosition(index) + 1;
-        
-      //  getSequence(s2,index,getDirectionIndex,ov);
-        
-        getPCharRead(s2,index,getDirection(index));
-        s += s2+ov;//(p+ov);
-        
-//        if (getDirection(index))
-//            s += getDirectRead(index).substr(ov);
-//        else
-//            s += getReverseRead(index).substr(ov);
+
+        //  getSequence(s2,index,getDirectionIndex,ov);
+
+        getPCharRead(s2, index, getDirection(index));
+        s += s2 + ov; //(p+ov);
+
+        //        if (getDirection(index))
+        //            s += getDirectRead(index).substr(ov);
+        //        else
+        //            s += getReverseRead(index).substr(ov);
 
         pos += R->getReadsLength() - ov;
-        index = getNext(index);
+        //index = getNext(index);
+        index = ((*this).*nextIt)(index);
     }
 
     return s;
@@ -473,53 +573,46 @@ string ReadsLayout::getReverseSequence(size_t listIndex) {
     return s;
 }
 
-void ReadsLayout::getVcoverage(size_t listIndex, bool direction, vector<unsigned int> &cov)
-{
+void ReadsLayout::getVcoverage(size_t listIndex, bool direction, vector<unsigned int> &cov) {
     unsigned int pos;
-    unsigned int sequenceLength=getSequenceLength(listIndex);
-    int rl=R->getReadsLength();
+    unsigned int sequenceLength = getSequenceLength(listIndex);
+    int rl = R->getReadsLength();
     size_t index;
-    
-    cov.clear();
-    cov.assign(sequenceLength,0);
-    vector<unsigned int> tmp;
-    tmp.assign(sequenceLength,0);
 
-    if (direction)
-    {
+    cov.clear();
+    cov.assign(sequenceLength, 0);
+    vector<unsigned int> tmp;
+    tmp.assign(sequenceLength, 0);
+
+    if (direction) {
         index = getBegin(listIndex);
 
-        while (index != 0)
-        {
+        while (index != 0) {
             pos = getPosition(index);
             cov[pos - 1]++;
             index = getNext(index);
         }
-    }
-    else
-    {
+    } else {
         index = listIndex;
-        sequenceLength-= (rl-1);
+        sequenceLength -= (rl - 1);
 
-        while (index != 0)
-        {
+        while (index != 0) {
             pos = getPosition(index);
-            pos=sequenceLength-pos;
+            pos = sequenceLength - pos;
             cov[pos]++;
             index = getPrevious(index);
         }
     }
-    
-    tmp[0]=cov[0];
-   
-    for (size_t i=1; i<cov.size(); i++)
-    {
-        cov[i]=cov[i]+cov[i-1];
-        tmp[i]=cov[i];
+
+    tmp[0] = cov[0];
+
+    for (size_t i = 1; i < cov.size(); i++) {
+        cov[i] = cov[i] + cov[i - 1];
+        tmp[i] = cov[i];
     }
-    
-    for (size_t i=rl; i<cov.size(); i++)
-        cov[i]-=tmp[i-rl];
+
+    for (size_t i = rl; i < cov.size(); i++)
+        cov[i] -= tmp[i - rl];
 }
 
 void ReadsLayout::print(size_t index, ostream &out, bool dir, unsigned int start, unsigned int maxD, Pairing *P) {
@@ -535,30 +628,30 @@ void ReadsLayout::print(size_t index, ostream &out, bool dir, unsigned int start
     size_t tmp;
 
     do {
-        
-        unsigned int position=getPosition(p);
-        
+
+        unsigned int position = getPosition(p);
+
         if (position > maxD)
             break;
 
-        if (position < start)
-        {
+        if (position < start) {
             tmp = p;
             p = getNext(p);
             continue;
         }
 
-        unsigned int pairedRead=0;
-        unsigned int pairedNode=0;
-        int lib=0;
+        unsigned int pairedRead = 0;
+        unsigned int pairedNode = 0;
+        int lib = 0;
+        bool pairedDir=true;
 
-        if (P->getNLibrary() != 0)
-        {
+        if (P->getNLibrary() != 0) {
             pairedRead = P->getPairing(p);
             pairedNode = getNodeId(pairedRead);
+            pairedDir = getDirection(pairedRead);
             lib = P->getPeLibraryID(p);
         }
-        
+
         if (getDirection(p))
             out << '>';
         else
@@ -567,10 +660,16 @@ void ReadsLayout::print(size_t index, ostream &out, bool dir, unsigned int start
         for (int i = 0; i < getPosition(p) % 120; i++)
             out << " ";
         if (getDirection(p))
-            out << getDirectRead(p) << " " << p << ' ' << lib << ' ' << pairedNode << '\n';
+            out << getDirectRead(p);
         else
-            out << getReverseRead(p) << " " << p << ' ' << lib << ' ' << pairedNode << '\n';
+            out << getReverseRead(p);
         
+        out << " " << p << ' ' << lib << ' ';
+        
+        if (pairedDir==false)
+            out << '!';
+        out << pairedNode << '\n';
+
         tmp = p;
         p = getNext(p);
 
@@ -582,215 +681,116 @@ void ReadsLayout::print(size_t index, ostream &out, bool dir, unsigned int start
         index = reverseComplement(index);
 }
 
-void ReadsLayout::statOverlaps(size_t listIndex, double &s, double &ss, unsigned int * distr) {
+//require nextOverHanging and reads multiplicity to be computed
+unsigned int ReadsLayout::sampleOH(size_t listIndex,
+        bool dir,
+        unsigned int maxD,
+        unsigned int *distr) {
 
-    if (getNext(listIndex) != 0) {
-        cout << "string ReadsLayout::statOverlaps(size_t i, double &s,double &ss) problem\n";
+    unsigned int index;
+    unsigned int pos;
+    int nodeLength = getSequenceLength(listIndex);
+    unsigned int rl = R->getReadsLength();
+    unsigned int nOverlap = 0;
+    int oh; //overhang
+
+    if (nextOverHanging == 0x0) {
+        LOG.oss << "[bug] ReadsLayout::sampleOH(...)";
+        LOG.flushStream(TOSTDERR);
         sendBugReportPlease(cerr);
     }
 
-    s = ss = 0.0;
-
-    unsigned int pos = 0;
-    unsigned int ov;
-    size_t index = getBegin(listIndex);
-
-    index = getNext(index);
-    pos = R->getReadsLength();
-
-    while (index != 0) {
-        ov = pos - getPosition(index) + 1;
-        distr[ov]++;
-        s += ov;
-        ss += (ov * ov);
-        pos += R->getReadsLength() - ov;
-        index = getNext(index);
-    }
-}
-
-void ReadsLayout::statOverlaps2(size_t listIndex,
-                            unsigned int &nOverlap,
-                            unsigned int &nSample,
-                            double &mean,
-                            unsigned int* distr)
-{
-    unsigned int pos = 0;
-    unsigned int oh; //over hanging
-    unsigned int mult;
-    size_t index = getBegin(listIndex);
-    
-    mean=0.0;
-    nOverlap=nSample=0;
-
-    index = getNext(index);
-    pos = R->getReadsLength();
-    unsigned int rl=R->getReadsLength();
-
-    while (index != 0) {
-        
-        mult=1;
-        oh = rl - (pos - getPosition(index) + 1);
-        
-        while(oh==0)
-        {
-            mult++;
-            index = getNext(index);
-            if (index == 0)
-                break;
-            pos += oh;
-            oh = rl - (pos - getPosition(index) + 1);
-        }
-
-        if (mult > 1)
-        {
-            nOverlap+=mult-1;
-            mult = (mult * mult) - mult;
-            distr[0] += mult;
-            nSample += mult;
-            if (index == 0)
-                break;
-        }
-        
-        distr[oh]++;
-        mean+=oh;
-        nSample++;
-        nOverlap++;
-        pos += oh;
-        index = getNext(index);
-    }
-    if (nSample==0)
-        mean=0.0;
-    else
-        mean/=nSample;
-}
-
-unsigned int ReadsLayout::sampleOH(size_t listIndex,
-                               bool dir,
-                               unsigned int maxD,
-                               unsigned int maxN,
-                               unsigned int *distr)
-{
-    unsigned int index;
-    unsigned int pos;
-    int nodeLength=getSequenceLength(listIndex);
-    unsigned int rl=R->getReadsLength();
-    unsigned int nOverlap=0;
-    unsigned int mult;
-    int oh; //overhang
-
-    if (dir)
-    {
+    if (dir) {
         index = getBegin(listIndex);
+
+        //zero length overhanging (identical reads)
+        oh = getMultiplicity(index);
+        nOverlap += oh-1;
+        oh = oh * oh - oh;
+        distr[0]+=oh;
+        
         pos = 1;
-        index = getNext(index);
+        index = nextOverHanging[index];
 
-        while (index != 0)
-        {
-            if (pos > maxD && maxD!=0)
-                break;
-            if (nOverlap > maxN && nOverlap!=0)
-                break;
+        while (index != 0) {
             
-            mult = 1;
             oh = getPosition(index) - pos;
-
-            while (oh == 0)
-            {
-                mult++;
-                index = getNext(index);
-                if (index == 0)
-                    break;
-
-                oh = getPosition(index) - pos;
-            }
-
-            if (mult > 1)
-            {
-                nOverlap += mult - 1;
-                mult = (mult * mult) - mult;
-                distr[0] += mult;
-
-                if (index == 0)
-                    break;
-            }
-
-            distr[oh]++;
-            nOverlap++;
             pos += oh;
-            index = getNext(index);
-        }
-    }
-    else
-    {
-        pos=nodeLength-rl+1;
-        index = getPrevious(listIndex);
-
-        while (index != 0)
-        {
-            if (nodeLength - (pos+rl-1) > maxD && maxD!=0)
-                break;
-            if (nOverlap > maxN && nOverlap!=0)
+            
+            if (pos > maxD && maxD != 0)
                 break;
             
-            mult = 1;
-            oh = pos - getPosition(index);
-
-            while (oh == 0)
-            {
-                mult++;
-                index = getPrevious(index);
-                if (index == 0)
-                    break;
-
-                oh = pos - getPosition(index);
-            }
-
-            if (mult > 1)
-            {
-                nOverlap += mult - 1;
-                mult = (mult * mult) - mult;
-                distr[0] += mult;
-
-                if (index == 0)
-                    break;
-            }
-
             distr[oh]++;
             nOverlap++;
+
+            //zero length overhanging (identical reads)
+            oh = getMultiplicity(index);
+            nOverlap += oh-1;
+            oh = oh * oh - oh;
+            distr[0]+=oh;
+
+            index = nextOverHanging[index];
+        }
+
+    } else {
+        
+        oh = getMultiplicity(listIndex);
+        nOverlap += oh-1;
+        oh = oh * oh - oh;
+        distr[0]+=oh;
+
+        pos = nodeLength - rl + 1;
+        index = previousOverHanging[listIndex];
+      
+        while (index != 0) {
+            
+            oh = pos - getPosition(index);
             pos -= oh;
-            index = getPrevious(index);
+            
+            if (nodeLength - pos - rl +2 > maxD && maxD != 0)
+                break;
+            
+            distr[oh]++;
+            nOverlap++;
+
+            //zero length overhanging (identical reads)
+            oh = getMultiplicity(index);
+              nOverlap += oh-1;
+            oh = oh * oh - oh;
+            distr[0]+=oh;
+            
+            index = previousOverHanging[index];
         }
     }
     
     return nOverlap;
 }
 
-double ReadsLayout::getMeanOverlapSize(size_t listIndex)
-{
-    double sum=0.0;
+double ReadsLayout::getMeanOverlapSize(size_t listIndex) {
+    double sum = 0.0;
     size_t index = getBegin(listIndex);
-    size_t pos=R->getReadsLength();
+    size_t pos = R->getReadsLength();
     unsigned int ov;
-    unsigned int nEchant=0;
-    
+    unsigned int nEchant = 0;
+
     index = getNext(index);
-    
+
     while (index != 0) {
-        ov=pos - getPosition(index) + 1;
-        sum+=ov;
+        ov = pos - getPosition(index) + 1;
+        sum += ov;
         pos += R->getReadsLength() - ov;
         index = getNext(index);
         nEchant++;
     }
-    
+
     if (sum == 0)
         return 0.0;
     else
-        return sum/nEchant;
+        return sum / nEchant;
 }
 
-
 bool ReadsLayout::checkLayout(size_t index) {
+
     if (getNext(index) != 0) {
         cerr << "next!=0" << endl;
         return false;
@@ -818,25 +818,76 @@ bool ReadsLayout::checkLayout(size_t index) {
     return index;
 }
 
-void ReadsLayout::writeReadsAsFasta(size_t index, ostream &out)
-{
-    while (index!=0)
-    {
+void ReadsLayout::writeReadsAsFasta(size_t index, ostream &out) {
+    while (index != 0) {
         out << '@' << index << '\n';
         out << getDirectRead(index) << endl;
         out << '+' << index << '\n';
-        for (int i=0; i<54; i++) //fastq
+        for (int i = 0; i < 54; i++) //fastq
             out << 'C';
         out << '\n';
-        index=getPrevious(index);
+        index = getPrevious(index);
     }
 }
 
-void ReadsLayout::flagReads(size_t index, char state)
-{
-    while (index!=0)
-    {
-        R->setFlag(index,state);
-        index=getPrevious(index);
+void ReadsLayout::flagReads(size_t index, char state) {
+    while (index != 0) {
+        R->setFlag(index, state);
+        index = getPrevious(index);
+    }
+}
+
+//TO TEST
+void ReadsLayout::buildOverHangingLinks(size_t index) {
+
+    if (nextOverHanging == 0x0 || previousOverHanging == 0x0) {
+        LOG.oss << "[bug] overhanging links not allocated\n";
+        LOG.flushStream(TOSTDERR);
+        sendBugReportPlease(cerr);
+    }
+
+    // index is the last element of the list. This function enumerates the
+    // list from last element to first one (i.e. reverse direction).
+
+    //
+    //   |>>>>|>|>>>>|>>|>null          < nextOverHanging
+    //   0000-0-0000-00-000000000
+    // null<|<|<<<<|<<|<<<<<<<<<|  < previousOverHanging 
+
+    size_t firstEquivalent = 0; //null
+    size_t lastEquivalent = index;
+    size_t current = index;
+    size_t previousP = getPrevious(current);
+    unsigned int mult;
+    unsigned int nrR;
+
+    if (getNext(index) != 0) {
+        LOG.oss << "[bug] buildOverHangingLinks(size_t index)\n";
+        LOG.flushStream(TOSTDERR);
+        sendBugReportPlease(cerr);
+    }
+
+    while (current != 0) {
+        
+        mult = 1;
+        while (getPosition(previousP) == getPosition(current)) {
+            current = previousP;
+            previousP = getPrevious(current);
+            mult++;
+            //exit when previousP==0 because position[previousP]=0 and position[current>=1]
+        }
+        
+        //get id (address) of current in nrReads 
+        nrR = R->getNrReadId(current);
+        R->setMultiplicty(nrR, mult);
+
+        previousOverHanging[lastEquivalent] = previousP;
+        nextOverHanging[current] = firstEquivalent;
+
+        lastEquivalent = previousP;
+        firstEquivalent = current;
+
+        current = previousP;
+        previousP = getPrevious(current);
     }
 }

@@ -200,11 +200,11 @@ int BackwardsWalker::elongate(vector<unsigned int> &path) {
     //    while (reDo) {
     //    reDo = false;
 
-//    if (maxJump == 0)
-//        continue;
+    //    if (maxJump == 0)
+    //        continue;
 
     maxD = BST->V[headBSNode].getDistance() + maxJump;
-    
+
     do {
         previousHead = headBSNode;
 
@@ -313,12 +313,12 @@ int BackwardsWalker::elongate(vector<unsigned int> &path) {
 
     // } //end redo
 
-    
-   
+
+
     if (lastNew == headBSNode)
         BST->getPath(lastNew, path);
     else {
-         //include redundant ending path up to 'maxRedundany'
+        //include redundant ending path up to 'maxRedundany'
         unsigned int bsNode = lastNew;
         unsigned int nextNode = BST->V[bsNode].getSon();
 
@@ -470,16 +470,28 @@ int BackwardsWalker::stepElongate(unsigned int maxD, unsigned int &BSNode) {
 unsigned int BackwardsWalker::getDecision() {
     PEMatches *pem;
     vector<BSNode>::iterator pNode;
-    unsigned int chosen = 0;
+   // unsigned int chosen = 0;
     unsigned int nHit, sumHit, maxHit;
+    unsigned int choice = 0;
     size_t maxIndex;
     unsigned int nChoice = BSNode::branchingNodeIds.size();
     static vector<unsigned int> sumUp;
     static vector<unsigned int> sumUpTmp;
     static vector<unsigned int> hits;
+    static vector<int> nchosen;
     static vector<double> expNHits;
     sumUp.assign(nChoice, 0);
     hits.assign(nChoice, 0);
+    nchosen.assign(nChoice, 0);
+
+
+    //update march 27 2014
+    //do not require paired-end confirmation when elongation
+    //is not ambiguous
+    if (nChoice == 1) {
+        choice = BSNode::branchingNodeIds[0];
+        return choice;
+    }
 
     for (unsigned int i = 0; i < activeBsNodes.size(); i++) {
         pNode = BST->V.begin() + activeBsNodes[i];
@@ -519,38 +531,56 @@ unsigned int BackwardsWalker::getDecision() {
             if (maxHit >= minNPair && double(maxHit) / sumHit >= minRatio) {
                 //mark node for visualization
                 pNode->flag = true;
+                nchosen[maxIndex]++;
 
                 for (unsigned int index = 0; index < nChoice; index++) {
-                    sumUpTmp[index] += hits[index];
+                    sumUpTmp[index] += hits[index]; // sum up hits from all lib
                 }
 
             }
-        }
+        } //end for all lib
 
         for (unsigned int index = 0; index < nChoice; index++)
             sumUp[index] += sumUpTmp[index];
-    }
+    } //and for all nodes in determined path
 
-    maxHit = 0;
-    sumHit = 0;
+
 
     for (unsigned int i = 0; i < nChoice; i++) {
-        if (sumUp[i] > maxHit) {
-            maxHit = sumUp[i];
-            maxIndex = i;
+        if (nchosen[i] > 0) {
+            if (choice > 0) //conflict
+            {
+                choice = numeric_limits<unsigned int>::max();
+                break;
+            } else
+                choice = BSNode::branchingNodeIds[i];
         }
-        sumHit += sumUp[i];
     }
 
-    if (sumHit == 0)
-        return 0; //undetermined
+    return choice;
 
-    if ((double) maxHit / sumHit >= minRatio) {
-        chosen = BSNode::branchingNodeIds[maxIndex];
-    } else
-        return numeric_limits<unsigned int>::max(); //libraries conflict 
-
-    return chosen;
+    //    
+    //    
+    //    maxHit = 0;
+    //    sumHit = 0;
+    //
+    //    for (unsigned int i = 0; i < nChoice; i++) {
+    //        if (sumUp[i] > maxHit) {
+    //            maxHit = sumUp[i];
+    //            maxIndex = i;
+    //        }
+    //        sumHit += sumUp[i];
+    //    }
+    //
+    //    if (sumHit == 0)
+    //        return 0; //undetermined
+    //
+    //    if ((double) maxHit / sumHit >= minRatio) {
+    //        chosen = BSNode::branchingNodeIds[maxIndex];
+    //    } else
+    //        return numeric_limits<unsigned int>::max(); //libraries conflict 
+    //
+    //    return chosen;
 }
 
 void BackwardsWalker::CountPEMatches(vector<unsigned int> path, size_t p1, size_t p2) {

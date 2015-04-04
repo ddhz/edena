@@ -100,10 +100,12 @@ private:
     bool set_p1p2_ePath(); //from args(1)
     void dev();
     
-
-    
+    void sampleEdgeContext();
 
 };
+
+
+
 
 #endif	/* DEVSHELL_H */
 

@@ -36,7 +36,7 @@
 extern logWriter LOG;
 
 string edenaVersion() {
-    return "Edena v3.131028";
+    return "Edena v3.140225 (pre-release)";
 }
 
 void edenaVersion(ostream &out) {
@@ -44,7 +44,7 @@ void edenaVersion(ostream &out) {
 }
 
 void edenaAuthors(ostream &out) {
-    out << "Copyright (C) 2008,2011,2012,2013\nDavid Hernandez, Patrice Francois, Jacques Schrenzel\n";
+    out << "Copyright (C) 2008,2011,2012,2013,2014\nDavid Hernandez, Patrice Francois, Jacques Schrenzel\n";
     out << "Genomic Research Laboratory, Geneva University Hospitals, Switzerland\n";
     out << "All rights reserved.\n";
 }
@@ -77,6 +77,9 @@ void edenaUsage(int exitValue) {
             << "    -t\n"
             << "    -truncate <int>         Truncate the 3' end of the reads TO the specified\n"
             << "                            length\n"
+            << "    -ddi  <yes/no>          Remove duplicate paired-ends (reads pairs issued\n"
+            << "                            from the same insert sequence that are likely to be\n"
+            << "                            artefacts). Default: no.\n"
             << "  2) Assembler mode:\n"
             << "    -e\n"
             << "    -edenaFile <file.ovl>   Edena overlap (.ovl) file. Required.\n"
@@ -88,6 +91,9 @@ void edenaUsage(int exitValue) {
             << "                            coverage that was achieved by the sequencing run.\n"
             << "                            You should therefore try different values in order\n"
             << "                            to get the optimal one.\n"
+            << "    -ao\n"
+            << "    -autoOverlaps <yes/no>  Automatically computes a suited overlap size cutoff\n"
+            << "                            from a geometric distribution model. Default: yes\n"
             << "    -c\n"
             << "    -minContigSize <int>    Minimum size of the contigs to output.\n"
             << "                            Default is 1.5*readLength.\n"

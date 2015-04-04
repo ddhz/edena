@@ -34,6 +34,7 @@ char ReadsStorage::TOUPPER[256];
 
 ReadsStorage::ReadsStorage() {
     READS = 0x0;
+    multiplicity = 0x0;
     prefixTableD = 0x0;
     prefixTableR = 0x0;
     nrReadIds = 0x0;
@@ -67,6 +68,11 @@ void ReadsStorage::freeMemory() {
     if (READS != 0x0) {
         free(READS);
         READS = 0x0;
+    }
+    if (multiplicity != 0x0)
+    {
+        free(multiplicity);
+        multiplicity = 0x0;
     }
     if (nrReadIds != 0x0) {
         free(nrReadIds);
@@ -104,6 +110,8 @@ void ReadsStorage::allocate() {
     freeMemory();
     READS = (char*) malloc(1 + (size_t) (nNR_reads)*(readsLength + 1) * sizeof (char));
     READS[0] = '\0';
+    multiplicity = (unsigned int*) malloc( (1+nNR_reads)*sizeof(unsigned int) );
+    memset(multiplicity,0,(1+nNR_reads)*sizeof(unsigned int));
     nrReadIds = (unsigned int*) malloc((effectiveNReads + 1) * sizeof (unsigned int));
     nrReadDirection = (char*) malloc((effectiveNReads + 1) * sizeof (char));
     flags = (char*) malloc((effectiveNReads + 1) * sizeof (char));
@@ -112,8 +120,10 @@ void ReadsStorage::allocate() {
 
 void ReadsStorage::adjustAllocation() {
     void* p;
-    p = realloc((void*) READS, 1 + (size_t) (nNR_reads) * (readsLength + 1));
+    p = realloc((void*) READS, 1 + (size_t) (nNR_reads) * (readsLength + 1) * sizeof (char));
     READS = (char*) p;
+    p = realloc((void*) multiplicity, (1+nNR_reads)*sizeof(unsigned int));
+    multiplicity = (unsigned int*) p;
     p = realloc((void*) nrReadIds, (effectiveNReads + 1) * sizeof (unsigned int));
     nrReadIds = (unsigned int*) p;
     p = realloc((void*) nrReadDirection, (effectiveNReads + 1) * sizeof (char));
@@ -260,7 +270,7 @@ unsigned int ReadsStorage::insertRead(const char* p) {
             pp += readsLength + 1;
             nNR_reads++;
             id = nNR_reads;
-        } else {
+        } else {//already exist
             id = getId(*(ret.first));
         }
     } else {//already exist reverse complemented
@@ -276,23 +286,56 @@ unsigned int ReadsStorage::insertRead(const char* p) {
     effectiveNReads++;
     nrReadIds[effectiveNReads] = id;
     nrReadDirection[effectiveNReads] = dir;
+    multiplicity[id]++;
 
     return id;
 }
 
+//do not consider library independently!
+ unsigned int ReadsStorage::countDuplicateMates(Pairing *P)
+ {
+     this->initDuplicateCheck();
+     
+     unsigned int n = P->getNPairing();
+     unsigned int nDup=0;
+     unsigned int r1,r2;
+     
+     for (unsigned int i=0; i<n; i++)
+     {
+         r1=P->getR1(i);
+         r2=P->getR2(i);
+         if (isDuplicateMate(r1,r2))
+             nDup++;
+     }
+     
+     return nDup;
+ }
+ 
 bool ReadsStorage::isDuplicateMate(unsigned int r1, unsigned int r2) {
+    
     static mateInsert M;
-    pair < set<mateInsert>::iterator, bool> ret;
+    set<mateInsert>::iterator it;
 
-    M.dir1 = nrReadDirection[r1];
-    M.dir2 = nrReadDirection[r2];
     M.r1 = nrReadIds[r1];
     M.r2 = nrReadIds[r2];
-
-    ret = mateInsertBTree.insert(M);
-
-    //ret.second is set to true if a new element has been insert
-    return !ret.second;
+    M.dir1 = nrReadDirection[r1];
+    M.dir2 = nrReadDirection[r2];
+    
+    it = mateInsertBTree.find(M);
+    if (it==mateInsertBTree.end())
+    {
+        //search reverse comp as well
+        M.reverse();
+        it = mateInsertBTree.find(M);
+    }
+    
+    if (it==mateInsertBTree.end())
+    {
+        mateInsertBTree.insert(M);
+        return false; //not duplicated
+    }
+    else
+        return true; 
 }
 
 unsigned int ReadsStorage::determineOverlaps(unsigned int nrId,
@@ -567,12 +610,12 @@ unsigned int ReadsStorage::determineOverlaps2(unsigned int nrId,
     return nOvRight;
 }
 
-int ReadsStorage::loadReadsFiles(
-        string infile1,
+int ReadsStorage::loadReadsFiles(string infile1,
         string infile2,
         int mateOrientation,
         Pairing* P,
-        ReadsLayout* L) {
+        ReadsLayout* L,
+        bool removeDuplicate, unsigned int& nDuplicate) {
 
     if (readsLength == 0) {
         LOG.oss << "[err] ReadsStorage problem\n";
@@ -583,9 +626,8 @@ int ReadsStorage::loadReadsFiles(
     string buffer;
     bool paired;
     unsigned int nFastaEntries = 0;
-
+    
     initDuplicateCheck();
-    unsigned int nDuplicate = 0;
     bool dupInsert;
 
     if (infile2 == "")
@@ -661,10 +703,12 @@ int ReadsStorage::loadReadsFiles(
 
     bool clean1 = false, clean2 = false;
     bool dir1 = true, dir2 = true;
-    unsigned int id1 = 0, id2 = 0;
     unsigned int nrId1 = 0, nrId2 = 0;
+    unsigned int read1ID = 0, read2ID = 0;
     static unsigned int nUnambiguousReads;
     unsigned int nAmbiguous = 0;
+    unsigned int nDup=0;
+    
     while (!in1.eof()) {
         getline(in1, buffer); //header
         in1.read(s1, readsLength);
@@ -687,32 +731,32 @@ int ReadsStorage::loadReadsFiles(
         if (paired)
             clean2 = toUpperAndCheckDNA(s2);
 
-        nrId1 = nrId2 = 0;
+        read1ID = read2ID = 0;
 
         if (clean1) {
-            id1 = insertRead(s1);
-            nrId1 = effectiveNReads;
+            nrId1 = insertRead(s1);
+            read1ID = effectiveNReads;
             nUnambiguousReads++;
         }
 
         if (clean2) {
-            id2 = insertRead(s2);
-            nrId2 = effectiveNReads;
+            nrId2 = insertRead(s2);
+            read2ID = effectiveNReads;
             nUnambiguousReads++;
         }
 
         dupInsert = false;
-
-        bool removeDuplicate = false;
+        
 
         if (paired && clean1 && clean2) {
 
             if (removeDuplicate) {
 
-                if (isDuplicateMate(nrId1, nrId2)) {
-                    nDuplicate++;
+                if (isDuplicateMate(read1ID, read2ID)) {
+                    nDup++;
                     effectiveNReads -= 2;
                     dupInsert = true;
+                    
                 }
             }
 
@@ -725,13 +769,13 @@ int ReadsStorage::loadReadsFiles(
                 //id1 = insertRead(s1);
 
                 // nUnambiguousReads++;
-                L->initLayout(nrId1, 1, true, id1);
+                L->initLayout(read1ID, true, nrId1);
 
-                if (L->getLastIdentical(id1) != 0) {
-                    dir1 = nrReadDirection[nrId1];
-                    L->merge(L->getLastIdentical(id1), nrId1, dir1, 0);
+                if (L->getLastIdentical(nrId1) != 0) {
+                    dir1 = nrReadDirection[read1ID];
+                    L->merge(L->getLastIdentical(nrId1), read1ID, dir1, 0);
                 }
-                L->setLastIdentical(id1, nrId1);
+                L->setLastIdentical(nrId1, read1ID);
             } else
                 nAmbiguous++;
 
@@ -739,14 +783,14 @@ int ReadsStorage::loadReadsFiles(
                 if (clean2) {
                     // id2 = insertRead(s2);
                     // nUnambiguousReads++;
-                    L->initLayout(nrId2, 1, true, id2);
+                    L->initLayout(read2ID, true, nrId2);
 
-                    if (L->getLastIdentical(id2) != 0) {
-                        dir2 = nrReadDirection[nrId2];
-                        L->merge(L->getLastIdentical(id2), nrId2, dir2, 0);
+                    if (L->getLastIdentical(nrId2) != 0) {
+                        dir2 = nrReadDirection[read2ID];
+                        L->merge(L->getLastIdentical(nrId2), read2ID, dir2, 0);
                     }
 
-                    L->setLastIdentical(id2, nrId2);
+                    L->setLastIdentical(nrId2, read2ID);
                 } else
                     nAmbiguous++;
             }
@@ -796,7 +840,11 @@ int ReadsStorage::loadReadsFiles(
 
     nDiscardedReads += nAmbiguous;
     LOG.oss << "   Loaded: " << nFastaEntries << ", discarded: " << nAmbiguous << endl;
-    // cout << " nDuplicate: " << nDuplicate << endl;
+    if(removeDuplicate)
+    {
+        LOG.oss << "   Removed redundant insert: " << nDup << endl;
+        nDuplicate+=nDup;
+    }
 
     if (readsLength == originalRL)
         LOG.oss << "   Reads length: " << readsLength << endl;
@@ -814,6 +862,25 @@ int ReadsStorage::loadReadsFiles(
     delete[] sComp;
 
     return 0;
+}
+
+double ReadsStorage::readMultiplicityDistr()
+{
+    if (multiplicity[1]==0)
+    {
+        LOG.oss << "[err] reads multiplicity not allocated\n";
+        LOG.flushStream(TOSTDERR);
+        exit(0);
+    }
+    double mean=0.0;
+    
+    for (unsigned int i=1; i <= getN_nrReads(); i++)
+    {
+        mean += getMultiplicity(i);
+    }
+    
+    mean/=getN_nrReads();
+    return mean;
 }
 
 char** ReadsStorage::d_prefix_lowerBound(const char *r) {

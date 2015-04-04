@@ -70,18 +70,21 @@ public:
     vector<string> drPairedEndFiles;
     vector<string> rdPairedEndFiles;
     string ovlFile;
+    string contextualCleaning;
     
-    bool contextualCleaning;
     bool cleanGraph;
     bool interactiveShell;
     bool discardNonUsable;
     bool discardSuspicousNodes;
     bool cleanBubbles;
     bool trimRed;
+    bool removeDuplicate;
+    bool autoOverlapCutoff;
     
     //non documented dev flags
     bool writeOSG;
     bool checkGraph;
+    bool onlineReduction;
     
 private:
     void checkParamConsistency();

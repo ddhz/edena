@@ -21,6 +21,16 @@
 
 #ifndef NODE_H
 #define NODE_H
+
+#define FLAG_A 1
+#define FLAG_B 2
+#define FLAG_C 4
+#define FLAG_D 8
+#define FLAG_E 16
+#define FLAG_F 32
+#define FLAG_G 64
+#define FLAG_H 128
+
 #include <cstddef>
 #include <vector>
 #include <deque>
@@ -56,6 +66,7 @@ struct NodeMem {
 
 //quick addition to be used by the new "sortById" method
 //the whole graph structure should be recoded one day...
+
 struct Edge {
     unsigned int ovId;
     short ovSize;
@@ -167,7 +178,6 @@ public:
     void dotAround(ostream &out, int depthLimit, int currentDepth);
     static void closeDot(ostream &out);
     void dotLocalGraph(int depth, string fileName);
-    void writeDotGraph(ostream &out, int &depthLimit, int currentDepth);
 
     //accessors
 
@@ -262,26 +272,23 @@ public:
     bool testReciprocal2(); //test
 
     //must be applied to ALL node
-    int removeMarkedEdge();
+    int removeMarkedEdgeUnrec(unsigned char FLAG);
     int removeEdgesByValue(float suspectCutoff, float GIncoherentCutoff);
 
-    void computeEdgesProb(unsigned int maxD, unsigned int max, double reliableCutoff);
-
+    void computeEdgesProb(unsigned int maxD, double reliableCutoff);
     unsigned int bubble(bool dir, double minCov);
 
     //the one to be called
     unsigned int sampleOverHangs(
             bool direction,
             unsigned int maxD,
-            unsigned int maxN,
             unsigned int *distr1);
-    //do not call this one!
-    unsigned int sampleOverHangsRec(
+
+    //recursive one
+    unsigned int sampleOverHangsR(
             bool direction,
             unsigned int maxD,
-            unsigned int maxN,
             unsigned int currentD,
-            unsigned int currentN,
             unsigned int *distr1);
 
     unsigned int getReciprocal(unsigned int index);
@@ -295,16 +302,7 @@ public:
     };
 
     void flagReads(char state);
-    void removeAllEdges();
-
-    void setEdgeFlag(unsigned int index, bool state); //mark edge i and its reciprocal
-    void setEdgeFlagUnrec(unsigned int index, bool state); //do not take care of the reciprocal
-    void initEdgeFlags(bool state);
-
-    inline bool getEdgeFlag(unsigned int index) {
-        return edgeBitsFlag[index];
-    }
-
+    void removeAllEdgesUnRec();
 
     void initializeEdgeValues(float v); //set all edge values to zero
     void setEdgeValue(unsigned int index, float value);
@@ -388,7 +386,11 @@ public:
     }
 
     //transitive edges reduction
-
+    
+    inline void initTransitiveReductionFlags() {
+        flagsBit &= ~126;
+    }
+    
     inline bool isInplay(bool dir) {
         if (dir) return flagsBit & 2;
         else return flagsBit & 4;
@@ -401,33 +403,7 @@ public:
     inline void unsetInplay(bool dir) {
         dir ? flagsBit &= ~2 : flagsBit &= ~4;
     }
-
-    //heuristic for redundancy detection during layout phase
-
-    inline void setAlreadyUsed(bool dir) {
-        if (dir) flagsBit |= 8;
-        else flagsBit |= 16;
-    }
-
-    inline bool isAlreadyUsed(bool dir) {
-        if (dir) return flagsBit & 8;
-        else return flagsBit & 16;
-    }
-
-    inline void setAlreadyUsed() {
-        flagsBit |= 24;
-    }
-
-    inline bool isAlreadyUsed() {
-        return flagsBit & 24;
-    }
-
-    inline void unsetAlreadyUsed() {
-        flagsBit &= !24;
-    }
-
-    //used during transitive edge reduction
-
+    
     inline void setMultipleEdges(bool dir) {
         if (dir) flagsBit |= 8;
         else flagsBit |= 16;
@@ -469,6 +445,30 @@ public:
         flagsBit &= ~96;
     }
 
+    //heuristic for redundancy detection during layout phase
+
+    inline void setAlreadyUsed(bool dir) {
+        if (dir) flagsBit |= 8;
+        else flagsBit |= 16;
+    }
+
+    inline bool isAlreadyUsed(bool dir) {
+        if (dir) return flagsBit & 8;
+        else return flagsBit & 16;
+    }
+
+    inline void setAlreadyUsed() {
+        flagsBit |= 24;
+    }
+
+    inline bool isAlreadyUsed() {
+        return flagsBit & 24;
+    }
+
+    inline void unsetAlreadyUsed() {
+        flagsBit &= !24;
+    }
+    
     inline bool isDiscarded() {
         return (flagsBit & 128);
     }
@@ -507,102 +507,53 @@ public:
         flagsBit &= ~1;
     }
 
-    //edge flags
+    //edges flags
+    //FLAG_A : used by contextual cleaning
+    //FLAG_B : used by dot
+    //FLAG_C : used by dead-end removal procedure
+    //FLAG_D : used by ovsize cutoff
+    //FLAG_E : unused
+    //FLAG_F : unused
+    //FLAG_G : unused
+    //FLAG_H : unused
 
-    inline bool getEdgeFlagA(size_t i) {
-        return (edgeBitsFlag[i] & 1);
+    inline void setEdgeFlag(size_t edgeIndex, unsigned char FLAGMASK) {
+        edgeBitsFlag[edgeIndex] |= FLAGMASK;
+        (&N[ovId[edgeIndex]])->edgeBitsFlag[getReciprocal(edgeIndex)] |= FLAGMASK;
     }
 
-    inline void setEdgeFlagA(size_t i) {
-        edgeBitsFlag[i] |= 1;
+    inline void unsetEdgeFlag(size_t edgeIndex, unsigned char FLAGMASK) {
+        edgeBitsFlag[edgeIndex] &= ~FLAGMASK;
+        (&N[ovId[edgeIndex]])->edgeBitsFlag[getReciprocal(edgeIndex)] &= ~FLAGMASK;
     }
 
-    inline void unsetEdgeFlagA(size_t i) {
-        edgeBitsFlag[i] &= ~1;
+    inline bool getEdgeFlag(size_t edgeIndex, unsigned char FLAGMASK) {
+        return edgeBitsFlag[edgeIndex] & FLAGMASK;
     }
 
-    inline bool getEdgeFlagB(size_t i) {
-        return (edgeBitsFlag[i] & 2);
+    inline void setAllEdgeFlags(unsigned char FLAGMASK) {
+        for (size_t edgeIndex = 0; edgeIndex < nOv; edgeIndex++) {
+            edgeBitsFlag[edgeIndex] |= FLAGMASK;
+            (&N[ovId[edgeIndex]])->edgeBitsFlag[getReciprocal(edgeIndex)] |= FLAGMASK;
+        }
     }
 
-    inline void setEdgeFlagB(size_t i) {
-        edgeBitsFlag[i] |= 2;
+    inline void unsetAllEdgeFlags(unsigned char FLAGMASK) {
+        for (size_t edgeIndex = 0; edgeIndex < nOv; edgeIndex++) {
+            edgeBitsFlag[edgeIndex] &= ~FLAGMASK;
+            (&N[ovId[edgeIndex]])->edgeBitsFlag[getReciprocal(edgeIndex)] &= ~FLAGMASK;
+        }
     }
 
-    inline void unsetEdgeFlagB(size_t i) {
-        edgeBitsFlag[i] &= ~2;
+
+    //these version do not update flag state on the reciprocal edge
+
+    inline void setEdgeFlagUnrec(size_t edgeIndex, unsigned char FLAGMASK) {
+        edgeBitsFlag[edgeIndex] |= FLAGMASK;
     }
 
-    inline bool getEdgeFlagC(size_t i) {
-        return (edgeBitsFlag[i] & 4);
-    }
-
-    inline void setEdgeFlagC(size_t i) {
-        edgeBitsFlag[i] |= 4;
-    }
-
-    inline void unsetEdgeFlagC(size_t i) {
-        edgeBitsFlag[i] &= ~4;
-    }
-
-    inline bool getEdgeFlagD(size_t i) {
-        return (edgeBitsFlag[i] & 8);
-    }
-
-    inline void setEdgeFlagD(size_t i) {
-        edgeBitsFlag[i] |= 8;
-    }
-
-    inline void unsetEdgeFlagD(size_t i) {
-        edgeBitsFlag[i] &= ~8;
-    }
-
-    inline bool getEdgeFlagE(size_t i) {
-        return (edgeBitsFlag[i] & 16);
-    }
-
-    inline void setEdgeFlagE(size_t i) {
-        edgeBitsFlag[i] |= 16;
-    }
-
-    inline void unsetEdgeFlagE(size_t i) {
-        edgeBitsFlag[i] &= ~16;
-    }
-
-    inline bool getEdgeFlagF(size_t i) {
-        return (edgeBitsFlag[i] & 32);
-    }
-
-    inline void setEdgeFlagF(size_t i) {
-        edgeBitsFlag[i] |= 32;
-    }
-
-    inline void unsetEdgeFlagF(size_t i) {
-        edgeBitsFlag[i] &= ~32;
-    }
-
-    inline bool getEdgeFlagG(size_t i) {
-        return (edgeBitsFlag[i] & 64);
-    }
-
-    inline void setEdgeFlagG(size_t i) {
-        edgeBitsFlag[i] |= 64;
-    }
-
-    inline void unsetEdgeFlagG(size_t i) {
-        edgeBitsFlag[i] &= ~64;
-    }
-
-    inline bool getEdgeFlagH(size_t i) {
-        return (edgeBitsFlag[i] & 128);
-    }
-
-    inline void setEdgeFlagH(size_t i) {
-        edgeBitsFlag[i] |= 128;
-    }
-
-    inline void unsetEdgeFlagH(size_t i) {
-        edgeBitsFlag[i] &= ~128;
+    inline void unsetEdgeFlagUnrec(size_t edgeIndex, unsigned char FLAGMASK) {
+        edgeBitsFlag[edgeIndex] &= ~FLAGMASK;
     }
 };
 

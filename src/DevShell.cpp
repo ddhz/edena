@@ -27,6 +27,7 @@
  */
 
 #include "DevShell.h"
+#include "stat.h"
 #include <limits>
 using namespace std;
 
@@ -98,6 +99,8 @@ void DevShell::prompt() {
             finished = true;
         } else if (args[0] == "dev") {
             dev();
+        } else if (args[0] == "cc") {
+            sampleEdgeContext();
         } else {
             whatDoYouMean(cerr);
         }
@@ -153,7 +156,9 @@ void DevShell::printHelp(ostream &out) {
             << "              Examples of valid syntaxes:\n"
             << "              12-!23[3-!2]!4\n"
             << "              12-!23[]3-!2-!4\n"
-            << "              12[!23]3-!2-!4\n";
+            << "              12[!23]3-!2-!4\n"
+            << "   To allow pasting line longer that 4096 char: type \"stty -icanon\" before\n"
+            << "   launching Edena\n";
 }
 
 void DevShell::growSearchTree() {
@@ -272,13 +277,6 @@ void DevShell::drawGraph() {
     if (args.size() < 2)
         return;
 
-    //    parseNodeId(args.at(1));
-    //    if (nodeID == 0)
-    //    {
-    //        whatDoYouMean(cerr);
-    //        return;
-    //    }
-
     vector<unsigned int> ePath;
     vector<unsigned int> nn;
     vector<bool> dd;
@@ -292,7 +290,6 @@ void DevShell::drawGraph() {
 
     unsigned int gDepth = 8;
 
-
     if (args.size() == 3) {
         iss.clear();
         iss.str(args.at(2));
@@ -301,9 +298,9 @@ void DevShell::drawGraph() {
 
     ofstream out("OSG.dot");
     Node::initDot(out);
+
     for (size_t i = 1; i < nn.size(); i++) {
         G->nodesTab[nn.at(i)].setTargeted();
-
     }
     for (size_t i = 1; i < nn.size(); i++) {
         G->nodesTab[nn.at(i)].dotAround(out, gDepth);
@@ -412,8 +409,8 @@ void DevShell::locateRead() {
         return;
     }
 
-    if (readId < 1 || readId >= R->getEffectiveNReads() + 1) {
-        cout << "<readID> out of range (1.." << R->getEffectiveNReads() << ")\n";
+    if (readId < 1 || readId >= R->getNumberOfReads() + 1) {
+        cout << "<readID> out of range (1.." << R->getNumberOfReads() << ")\n";
         return;
     }
     if (L->getDirection(readId) == false)
@@ -445,11 +442,25 @@ void DevShell::setCheckDistances() {
 }
 
 void DevShell::p3() {
+    
+    //check annotated path string (search for '[' and ']'
+    //and set p1 and p2 member according to the position of '[' and ']'
+    //in the path
     if (!set_p1p2_ePath()) {
         cerr << "invalid syntax" << endl;
         return;
     }
 
+    //   annotatedPath = "n1[n2]n3
+    //   this will produce annotated DNA string, excluding the
+    //   overlap region, which may be bad if neighbor node is 
+    //   not unique.
+    
+    //   .................... n1
+    //                 .............. n2   
+    //                         ..................... n2
+    //                       [   ]
+    //                       <---> = may be a single nucleotide!             
     unsigned int id, size;
     bool dir, currentDir;
     unsigned int currentNode;
@@ -477,8 +488,7 @@ void DevShell::p3() {
         }
 
         G->nodesTab[currentNode].getOverlap(ePath.at(i), id, size, dir);
-
-
+        
         if (p1 == i - 1) {
             //insert '[' before the overlaps
             s.insert(s.length() - size, "[");
@@ -497,6 +507,7 @@ void DevShell::p3() {
 
     ofstream out("out.dev");
     lineWrap(cerr, s, 70);
+    out << "edenaDev> p3 " << args.at(1) << '\n';
     lineWrap(out, s, 70);
     out.close();
 }
@@ -520,6 +531,7 @@ bool DevShell::set_p1p2_ePath() {
                 return false;
 
             open = true;
+            //convert '[' to '-' for the path to be a valid nodepath
             nodeList[i] = '-';
             count++;
             p1 = count;
@@ -556,29 +568,36 @@ bool DevShell::set_p1p2_ePath() {
 }
 
 void DevShell::dev() {
-    double minCoverage;
-    string s;
+    
+    unsigned int readId;
     iss.clear();
     iss.str(args.at(1));
-    iss >> minCoverage; //read ID
-    if (iss.fail()) {
-        whatDoYouMean(cerr);
-        return;
-    }
-
-    ofstream out("out.dev");
-
-    for (unsigned int i = 1; i <= G->getNNodes(); i++) {
-        if (G->nodesTab[i].getCoverage() >= minCoverage) {
-            out << ">node_" << i
-                    << " length=" << G->nodesTab[i].getSequenceLength()
-                    << " cov=" << G->nodesTab[i].getCoverage()
-                    << '\n';
-            s = G->nodesTab[i].getSequence(true);
-            lineWrap(out, s, 70);
-
-        }
-    }
+    iss >> readId;
+    cout << "multiplicity: " << L->getMultiplicity(readId) << endl;
+    cout << "paired ID: " << P->getPairing(readId) << endl;
+//    double minCoverage;
+//    string s;
+//    iss.clear();
+//    iss.str(args.at(1));
+//    iss >> minCoverage; //read ID
+//    if (iss.fail()) {
+//        whatDoYouMean(cerr);
+//        return;
+//    }
+//
+//    ofstream out("out.dev");
+//
+//    for (unsigned int i = 1; i <= G->getNNodes(); i++) {
+//        if (G->nodesTab[i].getCoverage() >= minCoverage) {
+//            out << ">node_" << i
+//                    << " length=" << G->nodesTab[i].getSequenceLength()
+//                    << " cov=" << G->nodesTab[i].getCoverage()
+//                    << '\n';
+//            s = G->nodesTab[i].getSequence(true);
+//            lineWrap(out, s, 70);
+//
+//        }
+//    }
 }
 
 void DevShell::parseNodeId(string buffer) {
@@ -599,4 +618,94 @@ void DevShell::parseNodeId(string buffer) {
         cout << "<nodeID> out of range (1.." << G->getNNodes() << ")\n";
         nodeID = 0;
     }
+}
+
+void DevShell::sampleEdgeContext() {
+
+    unsigned int maxD = 200;
+    G->nodeListToEPath(args.at(1), ePath);
+    if (ePath.size() != 3) {
+        cout << "Path must be made of two nodes (=one edge)\n";
+        return;
+    }
+
+
+    unsigned int node1 = ePath[1];
+    unsigned int node2 = G->nodesTab[node1].getOverlapId(ePath[2]);
+
+    bool node1Dir, node2Dir;
+
+    if (ePath[0] == 0)
+        node1Dir = false;
+    else
+        node1Dir = true;
+
+    node2Dir = G->nodesTab[node1].getOverlapDirection(ePath[2]);
+
+
+
+    //reliableCutoff: used to flag edges that are, or have at least one reliable brother
+
+    //sample requirements. 
+    unsigned int minSampleSize = 25;
+    unsigned int minSampledLength = 0;
+
+    unsigned int distr1[512];
+    unsigned int distr2[512];
+
+    unsigned int nOhSampled1 = 0;
+    unsigned int nOhSampled2 = 0;
+    unsigned int oh;
+    double prob,prob2, mean;
+    unsigned int rl = R->getReadsLength();
+
+    oh = G->nodesTab[node1].getOverlapSize(ePath[2]);
+    oh = G->getReadLength() - oh;
+    cout << "overhanging length OH: " << oh << endl;
+
+    memset(distr1, 0, 512 * sizeof (unsigned int));
+
+    nOhSampled1 = G->nodesTab[node1].sampleOverHangs(!node1Dir, maxD, distr1);
+    memset(distr2, 0, 512 * sizeof (unsigned int));
+    nOhSampled2 = G->nodesTab[node2].sampleOverHangs(node2Dir, maxD, distr2);
+
+    unsigned int nOhSampled = nOhSampled1 + nOhSampled2;
+
+    unsigned int sampleSize = 0, sum = 0;
+
+    for (unsigned int i = 0; i < rl; i++) {
+        distr1[i] += distr2[i];
+        sampleSize += distr1[i];
+        sum += i * distr1[i];
+    }
+    ofstream out("out.dev");
+    out << "oh\tnumber\trawNumber\n";
+    out << "0\t" << distr1[0] << "\t" << distr1[511] + distr2[511] << '\n';
+    for (unsigned int i = 1; i < rl; i++) {
+        out << i << '\t' << distr1[i] << '\t' << distr1[i] << '\n';
+    }
+    out.close();
+
+
+    cout << "nReads: " << nOhSampled << '\n';
+    cout << "sampleSize: " << sampleSize << '\n';
+    cout << "sum: " << sum << '\n';
+    //note: sum is equivalent to sampled length
+
+
+
+
+    if (sampleSize < minSampleSize || sum < minSampledLength) {
+        prob = prob2 = 2.0; //canceled
+    } else {
+
+        mean = (double) sum / sampleSize;
+      
+        prob2 = cdfShiftedGeom(1.0 / (mean + 1), oh);
+        //  prob = cdfOH(1.0 / (mean + 1), oh, 1.0);
+    }
+   // cout << std::setprecision(10) << std::scientific <<  "prob: " << prob << endl;
+     cout << std::setprecision(10) << std::scientific << "prob: " << prob2 << endl;
+
+
 }

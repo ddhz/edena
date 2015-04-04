@@ -47,6 +47,7 @@ bool DEV_INFO;
 ofstream outGlob; //for dev purpose
 unsigned long global_count;
 logWriter LOG;
+ Param param;
 
 int main(int argc, char **argv) {
 
@@ -54,14 +55,13 @@ int main(int argc, char **argv) {
     //  outGlob << "node\tindex\tsize\tprob\n";
 
     //parse and check command line
-    Param param;
     param.parseCommandLine(argc, argv);
 
     global_count = 0;
 
-    float CCreliableCutoff = 1e-2;
-    float CCsupectCutoff = 1e-4;
-    float CCGincoherantCutoff = 1e-6;
+    float CCreliableCutoff=1e-2;
+    float CCsupectCutoff=1e-4;
+    float CCGincoherantCutoff=1e-6;
     float nsd = 2.0; //used to determine min-max allowed distances for PE libraries
 
     Pairing *P = new Pairing();
@@ -158,13 +158,15 @@ int main(int argc, char **argv) {
 
         //Load reads files
         int mateOrientation = 1; // DR
+        unsigned int nDup = 0;
 
         for (size_t i = 0; i < param.singleEndFiles.size(); i++) {
             if (
-                    R->loadReadsFiles(param.singleEndFiles[i], "", 0, P, L)
+                    R->loadReadsFiles(param.singleEndFiles[i], "", 0, P, L, false, nDup)
                     != 0)
                 return EXIT_FAILURE;
         }
+
 
         for (size_t i = 0; i < param.drPairedEndFiles.size(); i += 2) {
             if (
@@ -172,33 +174,41 @@ int main(int argc, char **argv) {
                     param.drPairedEndFiles[i + 1],
                     mateOrientation,
                     P,
-                    L) != 0)
+                    L,
+                    param.removeDuplicate,
+                    nDup) != 0)
                 return EXIT_FAILURE;
         }
 
         mateOrientation = 2; //RD
+
         for (size_t i = 0; i < param.rdPairedEndFiles.size(); i += 2) {
             if (
                     R->loadReadsFiles(param.rdPairedEndFiles[i],
                     param.rdPairedEndFiles[i + 1],
                     mateOrientation,
                     P,
-                    L) != 0)
+                    L,
+                    param.removeDuplicate,
+                    nDup) != 0)
                 return EXIT_FAILURE;
         }
 
         R->adjustAllocation();
 
         cout << "done\n";
-        LOG.oss << "   Number of reads: " << R->getEffectiveNReads() << endl;
+        LOG.oss << "   Number of reads: " << R->getNumberOfReads() << endl;
         LOG.oss << "   Number of distinct sequences: " << R->getN_nrReads() << endl;
-        LOG.oss << "   Average reads redundancy: " << (float) R->getEffectiveNReads() / R->getN_nrReads() << endl;
+        LOG.oss << "   Mean reads multiplicity: " << R->readMultiplicityDistr() << endl;
+
+        if (param.removeDuplicate)
+            LOG.oss << "   Total number of redundant mates discarded: " << nDup << endl;
         LOG.flushStream(TOSTDOUT);
 
 
         if (param.drPairedEndFiles.size() >= 2 || param.rdPairedEndFiles.size() >= 2) {
             cout << "Building pairing index... " << flush;
-            P->buildIndex(R->getEffectiveNReads());
+            P->buildIndex(R->getNumberOfReads());
             cout << "done" << endl;
         }
 
@@ -209,8 +219,9 @@ int main(int argc, char **argv) {
         R->initPrefixTables();
         cout << "done" << endl;
 
+        //140207 changed default minOv from .5*readLength to .6*readLength
         if (param.minOverlap == 0)
-            param.minOverlap = R->getReadsLength() / 2;
+            param.minOverlap = (int) (R->getReadsLength() *.6);
         R->setMinOvSize(param.minOverlap);
 
         LOG.oss << "Minimum overlaps size: " << param.minOverlap << endl;
@@ -218,8 +229,17 @@ int main(int argc, char **argv) {
 
         LOG.oss << "Start computing overlaps";
         LOG.flushStream();
+
+        if (param.onlineReduction==false)
+        {
         G.computeOverlaps(param.nThreads);
-        G.removeTransitiveEdges();  
+        G.removeTransitiveEdges();
+        }
+        else
+        {
+            G.computeIrreductibeEdges();
+        }
+
         LOG.oss << "Done computing overlaps";
         LOG.flushStream();
         G.countEdges();
@@ -255,7 +275,7 @@ int main(int argc, char **argv) {
             LOG.oss << "argv[" << i << "] " << argv[i] << '\n';
         }
         LOG.flushStream();
-        
+
         if (G.loadData(param.ovlFile.c_str()) == false) {
             LOG.oss << "[err] Cannot open \"" << param.ovlFile.c_str() << "\"" << endl;
             LOG.flushStream(TOSTDERR);
@@ -266,11 +286,21 @@ int main(int argc, char **argv) {
         Node::setEdgeSortedFlag(true);
 
         LOG.oss << "   reads length:             " << R->getReadsLength() << '\n';
-        LOG.oss << "   number of reads:          " << R->getEffectiveNReads() << '\n';
+        LOG.oss << "   number of reads:          " << R->getNumberOfReads() << '\n';
         LOG.oss << "   number of nodes:          " << G.getNNodes() << '\n';
         LOG.oss << "   number of edges:          " << G.getNEdges() << '\n';
         LOG.oss << "   minimum overlap size:     " << G.getMinOverlap() << '\n';
         LOG.flushStream(TOSTDOUT);
+
+        //        cout << "counting...\r";
+        //        unsigned int nDup=R->countDuplicateMates(P);
+        //        cout << "************ " << nDup << endl;
+        
+        LOG.oss << "Building overhanging links\n";
+        LOG.flushStream(TOSTDOUT);
+        
+        //to see: overhanging links could be stored in the .ovl
+        G.buildOverHangingLinks();
 
         if (param.overlapCutoff != 0) {
             if (param.overlapCutoff > R->getReadsLength() - 1 ||
@@ -292,6 +322,17 @@ int main(int argc, char **argv) {
 
         unsigned int nNodes = 0, nReads = 0;
         unsigned int sum = 0;
+        
+        unsigned int NN;
+        unsigned int round=0;
+        
+//        do
+//        {
+//           
+//        
+//            round++;
+//            cout << "   GRAPH CLEANING ROUND " << round << endl;
+//            NN=G.getNNodes();
 
         if (param.cleanGraph) {
 
@@ -310,7 +351,7 @@ int main(int argc, char **argv) {
                 LOG.oss << "Removed orphan non-usable nodes: "
                         << nNodes
                         << " ("
-                        << (float) nReads / R->getEffectiveNReads()*100 << "% of the total number of reads)\n";
+                        << (float) nReads / R->getNumberOfReads()*100 << "% of the total number of reads)\n";
                 LOG.flushStream(TOSTDOUT);
 
                 //G.condense(true, true);
@@ -323,7 +364,7 @@ int main(int argc, char **argv) {
             LOG.oss << "   Removed dead-ends: "
                     << sum
                     << " ("
-                    << (float) nReads / R->getEffectiveNReads()*100
+                    << (float) nReads / R->getNumberOfReads()*100
                     << "% of the total number of reads)" << endl;
             LOG.flushStream(TOSTDOUT);
 
@@ -333,13 +374,43 @@ int main(int argc, char **argv) {
                     << " nodes";
             LOG.flushStream(TOSTDOUT);
 
+
+
             if (param.checkGraph)
                 G.checkConsistency();
 
-            if (param.contextualCleaning) {
+ //           LOG.oss << "Building overhanging links\n";
+ //           LOG.flushStream(TOSTDOUT);
+ //           G.buildOverHangingLinks();
+
+//            double m = R->readMultiplicityDistr();
+//            cout << "mean multiplicity: " << m << endl;
+//            cout << "expected size =" << R->getN_nrReads() / m;
+
+            G.estimateCoverage(param.minContigCoverage, param.targetSize);
+            
+            if (param.autoOverlapCutoff==true)
+            {
+                G.autoOvCutoff(param.minContigCoverage, param.prefix);
+            }
+
+            if (param.contextualCleaning != "no") {
+
                 //1) reliable cutoff
                 //2) suspect cutoff (removed only if gas at least one reliable brother
                 //3) G-incoherent cutoff (anyway removed)
+
+                if (param.contextualCleaning == "former")
+                    LOG.oss << "Contextual cleaning: using former model\n";
+                else
+                    LOG.oss << "Contextual cleaning:\n";
+                LOG.oss << std::scientific;
+                LOG.oss << "   CCreliableCutoff: " << CCreliableCutoff << '\n';
+                LOG.oss << "   CCsupectCutoff: " << CCsupectCutoff << '\n';
+                LOG.oss << "   CCGincoherantCutoff: " << CCGincoherantCutoff << '\n';
+                LOG.oss.unsetf(ios_base::floatfield);
+                LOG.oss << setprecision(1) << fixed;
+                LOG.flushStream();
 
                 G.computeEdgesProb(CCreliableCutoff);
                 sum = G.removeEdgesByValue(CCsupectCutoff, CCGincoherantCutoff);
@@ -362,7 +433,7 @@ int main(int argc, char **argv) {
                 LOG.oss << "   Removed dead-ends: "
                         << sum
                         << " ("
-                        << (float) nReads / R->getEffectiveNReads()*100
+                        << (float) nReads / R->getNumberOfReads()*100
                         << "% of the total number of reads)" << endl;
                 LOG.flushStream(TOSTDOUT);
 
@@ -372,7 +443,7 @@ int main(int argc, char **argv) {
                         << " nodes";
                 LOG.flushStream(TOSTDOUT);
             }
-
+            
             if (param.discardNonUsable) {
                 nNodes = G.discardShortOrphanNodes(nReads);
                 LOG.oss << "Removed orphan non-usable nodes: " << nNodes << endl;
@@ -383,8 +454,11 @@ int main(int argc, char **argv) {
                         << " nodes";
                 LOG.flushStream(TOSTDOUT);
             }
+//            param.minContigCoverage = 0.0;
+//            G.estimateCoverage(param.minContigCoverage, param.targetSize);
 
-            G.estimateCoverage(param.minContigCoverage, param.targetSize);
+            //            cout << "sampling overlaps sizes" << endl;
+            //            G.autoOvCutoff(param.minContigCoverage);
 
             if (param.cleanBubbles) {
                 nNodes = G.bubbles((double) param.minContigCoverage / 2);
@@ -397,7 +471,7 @@ int main(int argc, char **argv) {
                 LOG.flushStream(TOSTDOUT);
             }
 
-            if (param.minNodeCoverage > 0.0) { //undocumented: NOT used by default: use with caution
+            if (param.minNodeCoverage > 0.0) { //undocumented: NOT used by default: to be used with caution
                 cout << "Node coverage cutoff..." << flush;
                 nNodes = G.coverageCutoff(param.minNodeCoverage);
                 cout << "done\n";
@@ -409,13 +483,15 @@ int main(int argc, char **argv) {
                 LOG.flushStream(TOSTDOUT);
             }
 
-//            if (param.discardNonUsable) {
-//                nNodes = G.discardShortOrphanNodes(nReads);
-//                cout << "   " << nNodes << " nodes corresponding to " << nReads << " reads have been discarded ("
-//                        << (float) nReads / R->getEffectiveNReads()*100 << "%)\n";
-//                LOG.oss << "Removed orphan non-usable nodes: " << nNodes << endl;
-//                LOG.flushStream(TOSTDOUT);
-//            }
+
+
+            //            if (param.discardNonUsable) {
+            //                nNodes = G.discardShortOrphanNodes(nReads);
+            //                cout << "   " << nNodes << " nodes corresponding to " << nReads << " reads have been discarded ("
+            //                        << (float) nReads / R->getEffectiveNReads()*100 << "%)\n";
+            //                LOG.oss << "Removed orphan non-usable nodes: " << nNodes << endl;
+            //                LOG.flushStream(TOSTDOUT);
+            //            }
 
             if (param.discardSuspicousNodes) {
                 cout << "Discarding suspicious nodes... " << flush;
@@ -424,6 +500,9 @@ int main(int argc, char **argv) {
                 LOG.oss << "   Suspicious nodes removed: " << nNodes;
                 LOG.flushStream(TOSTDOUT);
             }
+
+            if (param.checkGraph)
+                G.checkConsistency();
 
             if (param.discardNonUsable || param.discardSuspicousNodes) {
                 G.condense(true, true);
@@ -440,7 +519,12 @@ int main(int argc, char **argv) {
                 G.saveData((param.prefix + ".osg").c_str());
                 cout << "done" << endl;
             }
+
         }
+            
+       // } while (G.getNNodes() != NN);
+
+
 
         if (param.cleanGraph == false)
             G.estimateCoverage(param.minContigCoverage, param.targetSize);

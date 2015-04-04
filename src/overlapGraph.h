@@ -89,6 +89,7 @@ class OverlapsGraph
     //END  quick multithreading implementation
     
     
+    void buildOverHangingLinks();
     void condense(bool verbose, bool sortEdges);
     void renumber(bool verbose, bool sortEdges);
 
@@ -148,7 +149,7 @@ class OverlapsGraph
     
     // a "nodePath" is a list of oriented nodes, provided by a list of node and a list of orientation.
     // this format is used to represent a path in a way easily readable for a human being.
-    
+
     string ePathToSeq(const vector<unsigned int> &path);
     
     unsigned int getNReadsInEPath(const vector<unsigned int> &path);
@@ -162,7 +163,7 @@ class OverlapsGraph
     
     void nodeListToEPath(string args, vector<unsigned int> &ePath);//for DEV mode
     void estimateCoverage(double &minCoverage, double &targetSize);
-
+    void autoOvCutoff(double minNodeCov, string prefix);
     static Node * nodesTab;//start at 1
     
     struct nodeRank

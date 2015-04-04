@@ -56,16 +56,30 @@ struct mateInsert
     
     inline bool operator< (const mateInsert& b) const
     {      
-        if (dir1 != b.dir1)
-            return dir1 > b.dir1;
-        else if (dir2 != b.dir2)
-            return dir2 > b.dir2;
-        else if (r1 != b.r1)
+        if (r1 != b.r1)
             return r1 > b.r1;
-        else
+        else if (r2 != b.r2)
             return r2 > b.r2;
+        else if (dir1 != b.dir1)
+            return dir1 > b.dir1;
+        else
+            return dir2 > b.dir2;
+       
+    }
+    inline void reverse()//swap
+    {
+        unsigned int tRead=r1;
+        char tDir=dir1;
+        r1=r2;
+        dir1=dir2;
+        r2=tRead;
+        dir2=tDir;
     }
 };
+
+//forward declaration
+class ReadsLayout;
+
 
 class ReadsStorage
 {
@@ -88,6 +102,7 @@ private:
     unsigned int effectiveNReads;
     char* pp;
     static char *READS; //non redundant
+    unsigned int *multiplicity;
 
     unsigned int *nrReadIds; //position in the NR reads set
     char *nrReadDirection;
@@ -210,6 +225,7 @@ public:
 
     unsigned int insertRead(const char* p);
     inline void initDuplicateCheck(){mateInsertBTree.clear();}
+    unsigned int countDuplicateMates(Pairing *P);
     bool isDuplicateMate(unsigned int r1, unsigned int r2);
    
     //use STL::set
@@ -224,12 +240,13 @@ public:
             vector<short>& OV,
             multiset<_OV, orderSet>& ovSet);
 
-    int loadReadsFiles(
-            string infile1,
+    int loadReadsFiles(string infile1,
             string infile2,
             int mateOrientation,
             Pairing*,
-            ReadsLayout*);
+            ReadsLayout*, bool removeDuplicate, unsigned int& nDuplicate);
+    
+    double readMultiplicityDistr();
     
     char** d_prefix_lowerBound(const char*);
     char** r_prefix_lowerBound(const char*);
@@ -257,7 +274,7 @@ public:
         else
             getReverseNR(dest, nrReadIds[id]);
     }
-    
+     
     inline int getReadsLength() const
     {
         return readsLength;
@@ -268,7 +285,7 @@ public:
         return nNR_reads;
     };
 
-    inline unsigned int getEffectiveNReads() const
+    inline unsigned int getNumberOfReads() const
     {
         return effectiveNReads;
     };
@@ -276,6 +293,19 @@ public:
     inline unsigned int getNDiscaredReads() const
     {
         return nDiscardedReads;
+    }
+    
+    inline unsigned int getNrReadId(unsigned int id)
+    {
+        return nrReadIds[id];
+    }
+    inline void setMultiplicty(unsigned int nrId, unsigned int m)
+    {
+        multiplicity[nrId]=m;
+    }
+    inline unsigned int getMultiplicity(unsigned int nrId)
+    {
+        return multiplicity[nrId];
     }
     inline void setMinOvSize(unsigned int m){minOvSize=m;}
     

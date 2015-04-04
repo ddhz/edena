@@ -26,6 +26,7 @@
 #include "NodeIt.h"
 #include "crc.h"
 #include "logWriter.h"
+#include "Param.h"
 #include <cmath>
 #include <algorithm>
 #include <set>
@@ -36,6 +37,7 @@
 
 extern bool DEV_INFO;
 extern logWriter LOG;
+extern Param param;
 bool PRINT_TREE;
 
 Node* OverlapsGraph::nodesTab = 0x0;
@@ -422,6 +424,12 @@ void OverlapsGraph::overlapNodeRange(void* ptr) {
     pthread_mutex_unlock(&mutex1);
 }
 
+void OverlapsGraph::buildOverHangingLinks() {
+    L->allocateOverHangingLinks();
+    for (size_t i = 1; i <= nNodes; i++)
+        L->buildOverHangingLinks(nodesTab[i].getLayout());
+}
+
 void OverlapsGraph::condense(bool verbose, bool sortEdges) {
 
     string concatSeq;
@@ -726,12 +734,13 @@ unsigned int OverlapsGraph::countEdges() {
 }
 
 void OverlapsGraph::computeEdgesProb(double reliableCutoff) {
-    cout << "Contextual cleaning: step1...\r" << flush;
 
+    cout << "Contextual cleaning: step1...\r" << flush;
     for (size_t i = 1; i <= nNodes; i++) {
         nodesTab[i].initializeEdgeValues(-1.0);
         //(default value)  nodesTab[i].initEdgeFlags(false); //used to tell whether the edge has at least one
         //reliable brother
+        nodesTab[i].unsetAllEdgeFlags(FLAG_A);
         nodesTab[i].unsetVisited();
     }
 
@@ -742,9 +751,8 @@ void OverlapsGraph::computeEdgesProb(double reliableCutoff) {
                 << "%           \r" << flush;
 
 
-        //  nodesTab[i].computeEdgesProb(200,50, reliableCutoff);
-        //  nodesTab[i].computeEdgesProb(200,100, reliableCutoff);
-        nodesTab[i].computeEdgesProb(100, 100, reliableCutoff);
+        nodesTab[i].computeEdgesProb(100, reliableCutoff);
+
     }
     cout << "Contextual cleaning: step1... done                    " << endl;
 
@@ -794,48 +802,22 @@ void OverlapsGraph::removeTransitiveEdges() {
 
     cout << "Flagging transitive edges...\r" << flush;
 
-    ofstream out_bin;
-    ifstream in_bin;
-    // out_bin.open("debugDATA", ios_base::binary);
-    //  in_bin.open("debugDATA", ios_base::binary);
-    vector<bool> flagged;
-
     for (unsigned int i = 1; i <= nNodes; i++) {
         if (i % 1000 == 0) {
             cerr << "Flagging transitive edges..." << (int) (((float) i / nNodes)*100) << "%\r" << flush;
         }
 
-        //     flagged.clear();
-
-
         nodesTab[i].markTransitiveEdges();
-        //      
-        //     unsigned int nnov=nodesTab[i].getNOverlap();
-        //     out_bin.write((char*)&nnov,sizeof(unsigned int) );
-        //       if (nodesTab[i].getNOverlap() > 0)
-        //       out_bin.write((char*) ((nodesTab[i].edgeBitsFlag)), nodesTab[i].getNOverlap()*sizeof (unsigned char));
-
-
-        //        unsigned char p;
-        //      flagged.clear();
-        //      unsigned int nnov;
-        //      in_bin.read( (char*) &nnov, sizeof(unsigned int));
-        //      for (unsigned int j=0; j<nnov; j++)
-        //      {
-        //          in_bin.read( (char*)(&p), sizeof(unsigned char));
-        //          flagged.push_back(p);
-        //      }
-
-        // nodesTab[i].anotherMarkTransitiveEdges2(flagged);
 
     }
+
     cout << "Flagging transitive edges... done    " << endl;
     //out_bin.close();
     for (unsigned int i = 1; i <= nNodes; i++) {
         if (i % 1000 == 0) {
             cerr << "Removing flagged edges..." << (int) (((float) i / nNodes)*100) << "%\r" << flush;
         }
-        nodesTab[i].removeMarkedEdge();
+        nodesTab[i].removeMarkedEdgeUnrec(255); //bitflags are not used here
     }
     cout << "Removing flagged edges... done" << endl;
 }
@@ -866,7 +848,7 @@ unsigned int OverlapsGraph::discardShortOrphanNodes(unsigned int &nDiscardedRead
     for (size_t i = 1; i <= getNNodes(); i++) {
         if (nodesTab[i].getSequenceLength() < maxSize &&
                 nodesTab[i].hasNeighbors() == false) {
-            nodesTab[i].removeAllEdges(); //should be only self overlaps
+            nodesTab[i].removeAllEdgesUnRec(); //should be only self overlaps
             //   nodesTab[i].isolate(); //required edges to be sorted
             nodesTab[i].setDiscarded();
 
@@ -958,11 +940,6 @@ unsigned int OverlapsGraph::identifyDeadEnd(unsigned int &dLimit, unsigned int &
     if (dLimit == 0)
         dLimit = 2 * R->getReadsLength() - 1;
 
-    //     do {
-    //                nDeadEnd = G.identifyDeadEnd(param.maxDeadEndLength, nReads);
-    //                sum += nDeadEnd;
-    //            } while (nDeadEnd != 0);
-
     do { //the whole process is iterated until no dead-end remains
         Node::nodeList.clear();
         nDeadEnds = 0;
@@ -974,7 +951,6 @@ unsigned int OverlapsGraph::identifyDeadEnd(unsigned int &dLimit, unsigned int &
             }
 
             if (nodesTab[i].isEnding(false)) {
-
                 identifyDeadEnd(i, true, nodesTab[i].getSequenceLength(), nDeadEnds, dLimit);
             }
         }
@@ -987,10 +963,10 @@ unsigned int OverlapsGraph::identifyDeadEnd(unsigned int &dLimit, unsigned int &
 
                 nodeId = nodesTab[i].getOverlapId(j);
                 if (nodesTab[nodeId].isDiscarded())
-                    nodesTab[i].setEdgeFlagUnrec(j, true);
+                    nodesTab[i].setEdgeFlagUnrec(j, FLAG_C);
+                //nodesTab[i].setEdgeFlagUnrec(j, true);
             }
-            nodesTab[i].removeMarkedEdge();
-
+            nodesTab[i].removeMarkedEdgeUnrec(FLAG_C);
         }
 
         for (vector<unsigned int>::iterator it = Node::nodeList.begin();
@@ -999,7 +975,7 @@ unsigned int OverlapsGraph::identifyDeadEnd(unsigned int &dLimit, unsigned int &
             // if (nodesTab[*it].getNOverlap() != 0)
             nrreads += nodesTab[*it].getNReads();
 
-            nodesTab[*it].removeAllEdges(); //no need to remove the reciprocal as well
+            nodesTab[*it].removeAllEdgesUnRec(); //no need to remove the reciprocal as well
             //already removed during previous step
             // nodesTab[*it].isolate();
 
@@ -1248,7 +1224,7 @@ void OverlapsGraph::estimatePairedDistance(unsigned int PEhorizon, unsigned int 
             sendBugReportPlease(cerr);
         }
 
-        distr.assign(horizon, 0);
+        distr.assign(horizon+1, 0);
 
 
         for (unsigned int i = start; i <= end; i++) {
@@ -1272,7 +1248,7 @@ void OverlapsGraph::estimatePairedDistance(unsigned int PEhorizon, unsigned int 
                 //     out << ">" << nUnique << "_2\n" << L->getDirectRead(id1) << '\n';
                 nUnique++;
                 pathLength = (size_t) Node::pathLengthMean;
-
+                
                 distr[pathLength]++;
                 meanLength += pathLength;
                 sdLength += pathLength*pathLength;
@@ -1306,17 +1282,22 @@ void OverlapsGraph::estimatePairedDistance(unsigned int PEhorizon, unsigned int 
 
         int min = (int) (meanLength - (nsd * sdLength));
         int max = (int) (meanLength + (nsd * sdLength));
+        
+        if (max > horizon)
+            max = horizon;
+        
         if (min < 0)
             min = 0;
 
         if (nCounted < 20)
             min = max = 0;
 
+    
         //bounded sample (mean +- nsd*sd)
         for (int i = 0; i < max - min + 1; i++)
             distr[i] = distr[min + i];
-
         distr.resize(max - min + 1, 0);
+        
         P->getLibraryIt(lib)->lengthDistr.setDistribution(distr, min, max);
         //  P->getLibraryIt(lib)->setVecDistr(distr);
 
@@ -1418,6 +1399,7 @@ void OverlapsGraph::assemble(
     ofstream out_lay;
     ofstream out_tab;
     ofstream out_nodeInfo;
+    ofstream out_nodeSeq;
     out.open((prefix + "_contigs.fasta").c_str());
     out_cov.open((prefix + "_contigs.cov").c_str());
 
@@ -1426,6 +1408,7 @@ void OverlapsGraph::assemble(
     out_lay.open((prefix + "_contigs.lay").c_str());
     out_tab.open((prefix + "_nodesPosition").c_str());
     out_nodeInfo.open((prefix + "_nodesInfo").c_str());
+    out_nodeSeq.open((prefix + "_nodesSeq.fasta").c_str());
     // }
 
     unsigned int contigCount = 0;
@@ -1454,6 +1437,7 @@ void OverlapsGraph::assemble(
 
     for (unsigned int node = 1; node <= getNNodes(); node++) {
 
+
         // if (DEV_INFO)
         // {
         out_nodeInfo << "node" << node << " "
@@ -1461,7 +1445,15 @@ void OverlapsGraph::assemble(
                 << nodesTab[node].getCoverage() << '\n';
         // }
 
+        out_nodeSeq << ">node_" << node
+                << " l=" << nodesTab[node].getSequenceLength()
+                << " c=" << nodesTab[node].getCoverage() << '\n';
+        lineWrap(out_nodeSeq, nodesTab[node].getSequence(true), 70);
+
+
         unsigned int i = rank.at(node - 1).nodeIndex;
+        if (i == 131)
+            cout << "";
 
         if (nodesTab[i].isAlreadyUsed() == true)
             continue;
@@ -1732,6 +1724,7 @@ void OverlapsGraph::assemble(
     out_lay.close();
     out_tab.close();
     out_nodeInfo.close();
+    out_nodeSeq.close();
     //   }
 }
 
@@ -2243,13 +2236,13 @@ void OverlapsGraph::estimateCoverage(double &minCoverage, double &targetSize) {
 
     if (minCoverage == 0.0) {
         //maybe not conservative enough...
-        minCoverage = a / 2.0;
+          minCoverage = a / 2.0;
 
         //far more conservative
-        //        minCoverage = median/2.0;
-        //        
-        //        if (minCoverage > q10)
-        //            minCoverage = q10;
+//        minCoverage = median / 2.0;
+//
+//        if (minCoverage > q10)
+//            minCoverage = q10;
 
         LOG.oss << " automatically set to: " << minCoverage << endl;
     } else {
@@ -2281,4 +2274,99 @@ void OverlapsGraph::estimateCoverage(double &minCoverage, double &targetSize) {
     LOG.flushStream(TOSTDOUT);
     targetSizeEstimation = targetSize;
 
+}
+
+void OverlapsGraph::autoOvCutoff(double minNodeCov, string prefix) {
+
+    unsigned int distr[512];
+    memset(distr, 0, 512 * sizeof (unsigned int));
+    unsigned int edgelength;
+
+
+    LOG.oss << "Global auto overlap cutoff\n";
+    LOG.oss << "   overHanging sampling:\n";
+
+    double pAutoCutOff = 1e-9;
+    int safeGuardOv = getReadLength()*.9;
+    unsigned int minSampleSize = 100;
+
+    for (unsigned int i = 1; i < getNNodes(); i++) {
+        if (nodesTab[i].hasBothSidesOV() &&
+                //nodesTab[i].getSequenceLength() >= getReadLength() + getReadLength() / 2 &&
+                nodesTab[i].getCoverage() >= minNodeCov &&
+                nodesTab[i].getNReads() >= 10) {
+
+            L->sampleOH(nodesTab[i].getLayout(), true, 0, distr);
+
+            //Also add largest edge to the sample
+            if (nodesTab[i].getNRightOverlap() != 0) {
+                edgelength = nodesTab[i].getRightOverlapSize(nodesTab[i].getNRightOverlap() - 1);
+                distr[getReadLength() - edgelength]++;
+            }
+        }
+    }
+
+    unsigned int sampleSize = 0, sum = 0;
+    for (unsigned int i = 0; i < this->getReadLength(); i++) {
+        sampleSize += distr[i];
+        sum += i * distr[i];
+    }
+
+    //sampleSize considering non-null overHanging sizes
+    unsigned int sampleSizeNN = sampleSize - distr[0];
+
+    //double mean = (double) sum / sampleSize;
+    double meanNonNull = (double) sum / sampleSizeNN;
+
+    //To avoid possible bias of overrepresented reads
+    //the geometric distribution is estimated only from
+    //overhanging size >= 1
+
+    //   double p = 1.0 / (mean + 1);
+    double pNN = 1.0 / meanNonNull;
+
+
+    LOG.oss << "   sampleSize(OH>0): " << sampleSizeNN << '\n';
+
+    if (sampleSizeNN < minSampleSize)
+        LOG.oss << "   sample size too small: aborting...\n";
+
+    else {
+        LOG.oss << "   mean(OH>0): " << meanNonNull << '\n';
+        // LOG.oss << "   mean(OH):" << mean << '\n';
+        LOG.oss << "   prob cutoff: " << setprecision(3) << std::scientific << pAutoCutOff << '\n';
+    }
+
+
+    int minOv = 0;
+    for (unsigned int i = 0; i < getReadLength() - 1; i++) {
+
+        if (pow(1 - pNN, i) <= pAutoCutOff) {
+            minOv = getReadLength() - 1 - i;
+            break;
+        }
+        //  cout << "ov: " << getReadLength()-1-i << " ";
+        //  cout << setprecision(5) << std::scientific << pow(1 - p, i) << " ";
+        //  cout << setprecision(5) << std::scientific << pow(1 - pNN, i) << endl;
+    }
+
+    if (minOv > safeGuardOv)
+        minOv = safeGuardOv;
+
+    if (minOv <= minOverlap || sampleSizeNN < minSampleSize) {
+        LOG.oss << "   [warn] Not able to determine overlap cutoff\n";
+        LOG.oss << "   [warn] You should optimize -m and -minCoverage manually\n";
+    } else {
+        LOG.oss << "   Applying auto overlap cutoff: " << minOv;
+        overlapSizeCutoff(minOv);
+        condense(true, true);
+    }
+
+    LOG.flushStream(TOSTDERR);
+
+    ofstream out((prefix + "OverangingSample.tab").c_str());
+    out << "ohSize\tcount\n";
+    for (unsigned int i = 0; i < getReadLength(); i++)
+        out << i << '\t' << distr[i] << '\n';
+    out.close();
 }

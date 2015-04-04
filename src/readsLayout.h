@@ -27,6 +27,8 @@
 #include <string>
 #include <vector>
 #include <deque>
+
+#include "readsStorage.h"
 using namespace std;
 
 class ReadsStorage;
@@ -40,31 +42,36 @@ public:
     virtual ~ReadsLayout();
 
     void init(ReadsStorage *R, unsigned int n);
+    void allocateOverHangingLinks();
     void cleanMemory();
 
     void save(ostream&);
     bool load(istream&, ReadsStorage*);
 
-    void initLayout(size_t layout, int pos, bool dir, unsigned int nodeId);
+    void initLayout(size_t layout, bool dir, unsigned int nodeId);
     void setLayoutNodeId(size_t layout, unsigned int nodeId);
 
     string getDirectRead(size_t i) const;
     string getReverseRead(size_t i) const;
     void getPCharRead(char *dest, size_t i, bool dir) const;
+    unsigned int getMultiplicity(size_t i);
 
     //list related accessor
     size_t getBegin(size_t index) const;
     size_t getEnd(size_t index) const;
     size_t reverseComplement(size_t index);
     size_t merge(size_t l1, size_t l2, bool direct, int size);
+    size_t link(size_t l1, size_t l2, bool direct, int ovsize);
 
     bool isUniDirectional(size_t i) const;
     unsigned int getSequenceLength(size_t listIndex) const;
     unsigned int getNReads(size_t listIndex) const;
     
-    unsigned int getNext(size_t i) const;
+    inline unsigned int getNext(size_t i) const {return next[i];}
     inline unsigned int getPrevious(size_t i) const {return previous[i];}
-
+    inline unsigned int getNextOverHanging(size_t i) const{return nextOverHanging[i];}
+    inline unsigned int getPreviousOverHanging(size_t i) const {return previousOverHanging[i];}
+    
     int getPosition(size_t i) const;
     bool getDirection(size_t i) const;
     unsigned int getNodeId(size_t i) const;
@@ -89,15 +96,16 @@ public:
     void getVcoverage(size_t listIndex, bool direction, vector<unsigned int> &cov);
 
     void print(size_t index, ostream &out, bool dir, unsigned int start, unsigned int distance, Pairing *P);
-    void statOverlaps(size_t i, double &s, double &ss, unsigned int*);
-    void statOverlaps2(size_t i, unsigned int &nOverlap, unsigned int& nSample, double& mean, unsigned int*);
-    unsigned int sampleOH(size_t listIndex, bool dir, unsigned int maxD, unsigned int maxN, unsigned int *distr1);
+
+    unsigned int sampleOH(size_t listIndex, bool dir, unsigned int maxD, unsigned int *distr1);
 
     double getMeanOverlapSize(size_t i);
     bool checkLayout(size_t index); //dev, destroy the lastIdentical tab!!
     void writeReadsAsFasta(size_t index, ostream &out);
     
     void flagReads(size_t index, char state);
+    
+    void buildOverHangingLinks(size_t index);
   
 private:
 
@@ -105,6 +113,11 @@ private:
     unsigned int tabSize; // > number of reads+1
     unsigned int *next;
     unsigned int *previous;
+    
+    //used for directly accessing next overhanging reads, and this bypassing identical aligned reads
+    unsigned int *nextOverHanging;
+    unsigned int *previousOverHanging;
+    
     unsigned int *nodeId;
     int *position; //encode relative position and direction
     unsigned char *flags;

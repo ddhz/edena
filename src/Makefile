@@ -47,21 +47,24 @@ logWriter.o: logWriter.cpp
 
 Param.o: Param.cpp
 	$(CCC) -o Param.o -c $(CFLAGS) Param.cpp
+
+dev.o:dev.cpp
+	$(CCC) -o dev.o -c $(CFLAGS) dev.cpp
 	
 edena:  node.o overlapGraph.o readsStorage.o stat.o BackwardsWalker.o \
 	NodeIt.o Pairing.o readsLayout.o globalFunc.o DevShell.o \
 	BeamSearchTree.o PEMatches.o ActualDistribution.o logWriter.o \
-	Param.o
+	Param.o dev.o
 	$(CCC) -o edena $(CFLAGS) main.cpp \
 	node.o overlapGraph.o readsStorage.o stat.o BackwardsWalker.o \
 	NodeIt.o Pairing.o readsLayout.o globalFunc.o DevShell.o \
 	BeamSearchTree.o PEMatches.o ActualDistribution.o logWriter.o \
-	Param.o
+	Param.o dev.o
 	
 clean:
-	rm node.o overlapGraph.o readsStorage.o stat.o BackwardsWalker.o \
+	rm -f node.o overlapGraph.o readsStorage.o stat.o BackwardsWalker.o \
 	NodeIt.o Pairing.o \
 	readsLayout.o globalFunc.o DevShell.o \
 	BeamSearchTree.o PEMatches.o ActualDistribution.o logWriter.o \
-	Param.o
+	Param.o dev.o
 	

@@ -69,16 +69,28 @@ void stats(vector<int>::iterator start, vector<int>::iterator end, ostream &out)
 //k  overhanging value
 //c  correction factor
 
-double cdfOH(double p, unsigned int k, double c) {
+
+//according to shifted geometric distribution (k \in {1,2,3,...})
+//p(X<=x) = 1-(1-p)**k
+//p(X>x) = 1- ( (1-p)**k) = (1-p)**k
+//p(X>=x) = (1-p)**(k-1)
+
+double cdfShiftedGeom(double p, unsigned int k) {
     if (k == 0)
-        return 1.0;
+    {
+        cerr << "cdfShiftedGeom out of range\n";
+        exit(0);
+    }
     else
-        return c * pow(1 - p, (int) k);
+        return pow(1 - p, (int) k-1);
 }
 
-double pdfOH(double p, unsigned int k, double c) {
+double cdfGeom(double p, unsigned int k) {
     if (k == 0)
-        return p * c - c + 1;
+    {
+        cerr << "cdfShiftedGeom out of range\n";
+        exit(0);
+    }
     else
-        return p * pow((1 - p), (int) k) * c;
+        return pow(1 - p, (int) k);
 }
